@@ -26,7 +26,7 @@ jobs:
   bump:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Compare versions
         id: v
@@ -55,7 +55,7 @@ jobs:
 
       - name: Open pull request
         if: steps.v.outputs.update == 'true'
-        uses: peter-evans/create-pull-request@v7
+        uses: peter-evans/create-pull-request@v8
         with:
           token: ${{ secrets.BOT_TOKEN || github.token }}
           branch: deps/claude-code-cli
