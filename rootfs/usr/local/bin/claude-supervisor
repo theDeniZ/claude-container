@@ -13,6 +13,12 @@ WORKSPACE="${CLAUDE_WORKSPACE:-/workspace}"
 RC_LOG="/tmp/remote-control.log"
 RC_PID_FILE="/tmp/remote-control.pid"
 
+# Started with --user as another UID: fall back to a private runtime dir.
+if [[ -n "${XDG_RUNTIME_DIR:-}" && ! -w "$XDG_RUNTIME_DIR" ]]; then
+  XDG_RUNTIME_DIR="$(mktemp -d)"
+  export XDG_RUNTIME_DIR
+fi
+
 # --- CLI updates ------------------------------------------------------------
 if is_true "${CLAUDE_AUTO_UPDATE:-false}"; then
   log "CLAUDE_AUTO_UPDATE=true, updating Claude Code..."

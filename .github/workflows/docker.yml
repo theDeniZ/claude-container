@@ -97,6 +97,8 @@ jobs:
           # UID/GID remapping
           [[ "$(docker exec -u claude smoke id -u)" == "1234" ]]
           [[ "$(docker exec -u claude smoke id -g)" == "1234" ]]
+          # Private runtime dir (Claude's messaging sockets) belongs to the remapped user
+          [[ "$(docker exec smoke stat -c '%u:%g %a' /run/claude)" == "1234:1234 700" ]]
           # Wrapper drops root to the claude user
           docker exec smoke claude --version
           # Workspace trust was written to the persistent config dir

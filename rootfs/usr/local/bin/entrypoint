@@ -40,6 +40,12 @@ if [[ "$(stat -c %u:%g "$CONFIG_DIR")" != "$PUID:$PGID" ]]; then
   chown -R "$PUID:$PGID" "$CONFIG_DIR"
 fi
 
+# --- Private runtime dir (XDG_RUNTIME_DIR, Claude's messaging sockets) -------
+RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/claude}"
+mkdir -p "$RUNTIME_DIR"
+chown "$PUID:$PGID" "$RUNTIME_DIR"
+chmod 0700 "$RUNTIME_DIR"
+
 # Workspace belongs to the host user; only warn if we can't write to it.
 if [[ -d /workspace ]] && ! gosu claude test -w /workspace; then
   log "WARNING: /workspace is not writable by UID $PUID. Set PUID/PGID to the owner of your project folder."
