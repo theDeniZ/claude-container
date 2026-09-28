@@ -1,0 +1,10 @@
+# Build the image from this repo instead of pulling it from GHCR:
+#   docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
+services:
+  claude:
+    image: claude-container:local
+    build:
+      context: .
+      args:
+        CLAUDE_VERSION: ${CLAUDE_VERSION:-latest}
+        EXTRA_APT_PACKAGES: ${EXTRA_APT_PACKAGES:-}

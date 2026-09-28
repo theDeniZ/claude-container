@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# Docker HEALTHCHECK. Healthy when:
+#   - the Claude CLI runs and the config dir is writable, and
+#   - if CLAUDE_REMOTE_CONTROL=true, the Remote Control server is running.
+set -uo pipefail
+
+is_true() { [[ "${1,,}" =~ ^(1|true|yes|on)$ ]]; }
+
+# Run the checks as the claude user (tmux sockets are per-user).
+if [[ "$(id -u)" == "0" ]]; then
+  exec gosu claude "$0" "$@"
+fi
+
+CLAUDE_BIN="${CLAUDE_BIN:-$HOME/.local/bin/claude}"
+CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+
+fail() { echo "UNHEALTHY: $*"; exit 1; }
+
+"$CLAUDE_BIN" --version >/dev/null 2>&1 || fail "claude CLI does not run"
+[[ -w "$CONFIG_DIR" ]] || fail "config dir $CONFIG_DIR is not writable"
+
+if is_true "${CLAUDE_REMOTE_CONTROL:-false}"; then
+  tmux has-session -t remote-control 2>/dev/null \
+    || fail "Remote Control is not running (logged in? see 'docker compose logs')"
+  [[ "$(tmux display-message -p -t remote-control '#{pane_dead}' 2>/dev/null)" != "1" ]] \
+    || fail "Remote Control process exited"
+  echo "OK: Remote Control running"
+else
+  echo "OK"
+fi

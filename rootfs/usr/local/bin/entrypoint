@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+# Container entrypoint (runs as root): maps the claude user to PUID/PGID, fixes
+# ownership of the persistent config dir, then drops privileges to run either
+# the given command or the supervisor (Remote Control / idle).
+set -euo pipefail
+
+log() { echo "[entrypoint] $*"; }
+
+PUID="${PUID:-1000}"
+PGID="${PGID:-1000}"
+CONFIG_DIR="${CLAUDE_CONFIG_DIR:-/home/claude/.claude}"
+
+if [[ "$(id -u)" != "0" ]]; then
+  # Started with --user: nothing to remap, just run.
+  exec /usr/local/bin/claude-supervisor "$@"
+fi
+
+# --- UID/GID mapping --------------------------------------------------------
+if [[ "$(id -g claude)" != "$PGID" ]]; then
+  log "Setting claude group GID to $PGID"
+  if getent group "$PGID" >/dev/null; then
+    usermod -g "$PGID" claude
+  else
+    groupmod -o -g "$PGID" claude
+  fi
+fi
+if [[ "$(id -u claude)" != "$PUID" ]]; then
+  log "Setting claude user UID to $PUID"
+  usermod -o -u "$PUID" claude
+fi
+if [[ "$(stat -c %u:%g /home/claude)" != "$PUID:$PGID" ]]; then
+  log "Fixing ownership of /home/claude"
+  chown -R "$PUID:$PGID" /home/claude
+fi
+
+# --- Persistent config dir --------------------------------------------------
+mkdir -p "$CONFIG_DIR"
+if [[ "$(stat -c %u:%g "$CONFIG_DIR")" != "$PUID:$PGID" ]]; then
+  log "Fixing ownership of $CONFIG_DIR"
+  chown -R "$PUID:$PGID" "$CONFIG_DIR"
+fi
+
+# Workspace belongs to the host user; only warn if we can't write to it.
+if [[ -d /workspace ]] && ! gosu claude test -w /workspace; then
+  log "WARNING: /workspace is not writable by UID $PUID. Set PUID/PGID to the owner of your project folder."
+fi
+
+exec gosu claude /usr/local/bin/claude-supervisor "$@"
