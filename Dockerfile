@@ -42,17 +42,21 @@ RUN apt-get update \
 RUN groupadd --gid 1000 claude \
  && useradd --uid 1000 --gid claude --create-home --shell /bin/bash claude \
  && mkdir -p /workspace /home/claude/.claude \
- && chown claude:claude /workspace /home/claude/.claude
+ && mkdir -m 0700 /run/claude \
+ && chown claude:claude /workspace /home/claude/.claude /run/claude
 
 # Owned by the runtime user so `claude update` (CLAUDE_AUTO_UPDATE) works in place.
 COPY --from=claude --chown=claude:claude /home/claude/.local /home/claude/.local
 COPY --chmod=0755 rootfs/usr/local/bin/ /usr/local/bin/
 
+# XDG_RUNTIME_DIR: private runtime dir for the claude user. Without it Claude
+#   keeps its messaging sockets in a shared /tmp/cc-socks owned by whoever made it first.
+# GIT_CONFIG_*: the workspace is bind-mounted with the host owner; if git is
+#   installed, don't let it refuse the repo (env config needs no git at build time).
 ENV PATH=/usr/local/bin:/home/claude/.local/bin:$PATH \
     CLAUDE_CONFIG_DIR=/home/claude/.claude \
     CLAUDE_BIN=/home/claude/.local/bin/claude \
-    # The workspace is bind-mounted with the host owner; if git is installed,
-    # don't let it refuse the repo. (Env-based config needs no git at build time.)
+    XDG_RUNTIME_DIR=/run/claude \
     GIT_CONFIG_COUNT=1 \
     GIT_CONFIG_KEY_0=safe.directory \
     GIT_CONFIG_VALUE_0=*
