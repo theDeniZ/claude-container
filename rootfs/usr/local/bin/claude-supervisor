@@ -10,8 +10,8 @@ is_true() { [[ "${1,,}" =~ ^(1|true|yes|on)$ ]]; }
 CLAUDE_BIN="${CLAUDE_BIN:-$HOME/.local/bin/claude}"
 CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 WORKSPACE="${CLAUDE_WORKSPACE:-/workspace}"
-RC_SESSION="remote-control"
 RC_LOG="/tmp/remote-control.log"
+RC_PID_FILE="/tmp/remote-control.pid"
 
 # --- CLI updates ------------------------------------------------------------
 if is_true "${CLAUDE_AUTO_UPDATE:-false}"; then
@@ -78,24 +78,27 @@ start_rc() {
   # shellcheck disable=SC2206 # intentional word splitting of user-supplied extra args
   [[ -n "${CLAUDE_RC_EXTRA_ARGS:-}" ]] && args+=(${CLAUDE_RC_EXTRA_ARGS})
 
-  log "Starting Remote Control: claude ${args[*]}"
-  # Run inside tmux so the CLI gets a real TTY and you can attach to it:
-  #   docker compose exec -u claude claude tmux attach -t remote-control
-  # The pane starts idle so its output is captured to $RC_LOG from the first byte.
-  tmux new-session -d -s "$RC_SESSION" -c "$WORKSPACE" -x 200 -y 50 "sleep infinity"
-  tmux pipe-pane -t "$RC_SESSION" -o "cat >> $RC_LOG"
-  tmux respawn-pane -k -t "$RC_SESSION" -c "$WORKSPACE" \
-    "$(printf '%q ' env -u ANTHROPIC_API_KEY -u CLAUDE_CODE_OAUTH_TOKEN "$CLAUDE_BIN" "${args[@]}")"
+  log "Starting Remote Control: claude ${args[*]} (output: $RC_LOG)"
+  # `script` (util-linux, in the base image) gives the CLI a real TTY and records
+  # its output. Its stdin is a FIFO we hold open, so it never sees EOF.
+  script -qfec "$(printf '%q ' env -u ANTHROPIC_API_KEY -u CLAUDE_CODE_OAUTH_TOKEN "$CLAUDE_BIN" "${args[@]}")" \
+    "$RC_LOG" <&3 >/dev/null 2>&1 &
+  rc_pid=$!
+  echo "$rc_pid" > "$RC_PID_FILE"
+}
+
+alive() {  # alive <pid>: running and not a zombie
+  local state
+  read -r _ _ state _ 2>/dev/null < "/proc/$1/stat" && [[ "$state" != "Z" ]]
 }
 
 rc_running() {
-  tmux has-session -t "$RC_SESSION" 2>/dev/null \
-    && [[ "$(tmux display-message -p -t "$RC_SESSION" '#{pane_dead}' 2>/dev/null)" != "1" ]]
+  [[ -n "${rc_pid:-}" ]] && alive "$rc_pid"
 }
 
 shutdown() {
   log "Stopping..."
-  tmux kill-server 2>/dev/null || true
+  [[ -n "${rc_pid:-}" ]] && kill "$rc_pid" 2>/dev/null
   exit 0
 }
 trap shutdown TERM INT
@@ -108,12 +111,24 @@ if ! is_true "${CLAUDE_REMOTE_CONTROL:-false}"; then
   exit 0
 fi
 
+cd "$WORKSPACE" 2>/dev/null || true
+rm -f "$RC_PID_FILE"  # /tmp survives `docker restart`
+RC_FIFO="$(mktemp -u /tmp/remote-control.stdin.XXXXXX)"
+mkfifo "$RC_FIFO"
+exec 3<>"$RC_FIFO"
+
 warned_login=0
 while true; do
   if ! rc_running; then
+    if [[ -n "${rc_pid:-}" ]]; then
+      code=0
+      wait "$rc_pid" 2>/dev/null || code=$?
+      log "Remote Control exited (exit code $code), restarting. See $RC_LOG"
+      rc_pid=""
+      rm -f "$RC_PID_FILE"
+    fi
     if logged_in_for_rc; then
       warned_login=0
-      tmux kill-session -t "$RC_SESSION" 2>/dev/null || true
       start_rc
     elif [[ $warned_login -eq 0 ]]; then
       log "Remote Control is on but no claude.ai login was found. Log in once with:"
