@@ -1,8 +1,10 @@
 # syntax=docker/dockerfile:1.7
-FROM debian:bookworm-slim
+# Base image is pinned by digest; Dependabot opens PRs when it changes.
+FROM debian:bookworm-slim@sha256:3783cc01769c7b2b1b83a5c5ad96c815348e28ed7da68e2e3687004faa906251
 
-# Claude Code version to install: "latest", "stable" or an exact version (e.g. 2.1.283).
-ARG CLAUDE_VERSION=latest
+# Claude Code version baked into the image. Pinned so every release is
+# reproducible; .github/workflows/update-claude-cli.yml opens a PR to bump it.
+ARG CLAUDE_VERSION=2.1.283
 # Extra Debian packages to bake into the image (space separated).
 ARG EXTRA_APT_PACKAGES=""
 

@@ -1,0 +1,22 @@
+version: 2
+updates:
+  # Base image digest: security fixes for users -> patch release.
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: daily
+    commit-message:
+      prefix: fix
+      include: scope
+
+  # CI actions don't change the image -> no release.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: chore
+      include: scope
+    groups:
+      actions:
+        patterns: ["*"]
