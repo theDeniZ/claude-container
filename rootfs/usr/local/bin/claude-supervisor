@@ -1,0 +1,127 @@
+#!/usr/bin/env bash
+# Runs as the claude user. Prepares Claude's config, optionally updates the CLI,
+# then either runs the given command or keeps the container alive, starting and
+# supervising a background Remote Control server when CLAUDE_REMOTE_CONTROL=true.
+set -euo pipefail
+
+log() { echo "[claude-container] $*"; }
+is_true() { [[ "${1,,}" =~ ^(1|true|yes|on)$ ]]; }
+
+CLAUDE_BIN="${CLAUDE_BIN:-$HOME/.local/bin/claude}"
+CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+WORKSPACE="${CLAUDE_WORKSPACE:-/workspace}"
+RC_SESSION="remote-control"
+RC_LOG="/tmp/remote-control.log"
+
+# --- CLI updates ------------------------------------------------------------
+if is_true "${CLAUDE_AUTO_UPDATE:-false}"; then
+  log "CLAUDE_AUTO_UPDATE=true, updating Claude Code..."
+  "$CLAUDE_BIN" update || log "WARNING: update failed, continuing with installed version"
+else
+  # Keep the version baked into the image; pull a newer image to upgrade.
+  export DISABLE_AUTOUPDATER=1
+fi
+log "Claude Code $("$CLAUDE_BIN" --version 2>/dev/null || echo '(unknown version)')"
+
+# --- Config seeding ---------------------------------------------------------
+# With CLAUDE_CONFIG_DIR set, both settings and the global state file
+# (.claude.json, which holds project trust) live in the persistent dir.
+STATE_FILE="$CONFIG_DIR/.claude.json"
+[[ -s "$STATE_FILE" ]] || echo '{}' > "$STATE_FILE"
+
+update_json() {  # update_json <file> <jq filter> [jq args...]
+  local file="$1" filter="$2" tmp; shift 2
+  tmp="$(mktemp "$file.XXXXXX")"
+  if jq "$@" "$filter" "$file" > "$tmp"; then mv "$tmp" "$file"; else rm -f "$tmp"; return 1; fi
+}
+
+if is_true "${CLAUDE_TRUST_WORKSPACE:-true}"; then
+  # shellcheck disable=SC2016 # $ws is a jq variable
+  update_json "$STATE_FILE" '.projects[$ws].hasTrustDialogAccepted = true' --arg ws "$WORKSPACE" \
+    || log "WARNING: could not mark $WORKSPACE as trusted in $STATE_FILE"
+fi
+
+if [[ "${CLAUDE_PERMISSION_MODE:-default}" == "bypassPermissions" ]]; then
+  # The container is the sandbox; skip the interactive "are you sure" prompt.
+  SETTINGS_FILE="$CONFIG_DIR/settings.json"
+  [[ -s "$SETTINGS_FILE" ]] || echo '{}' > "$SETTINGS_FILE"
+  update_json "$SETTINGS_FILE" '.skipDangerousModePermissionPrompt = true' \
+    || log "WARNING: could not update $SETTINGS_FILE"
+fi
+
+# --- Explicit command -------------------------------------------------------
+if [[ $# -gt 0 ]]; then
+  cd "$WORKSPACE" 2>/dev/null || true
+  exec "$@"
+fi
+
+# --- Remote Control ---------------------------------------------------------
+rc_env() {
+  # Remote Control needs a full claude.ai login; an API key or long-lived token
+  # in the environment would take precedence and make it fail.
+  env -u ANTHROPIC_API_KEY -u CLAUDE_CODE_OAUTH_TOKEN "$@"
+}
+
+logged_in_for_rc() {
+  local status
+  status="$(rc_env "$CLAUDE_BIN" auth status 2>/dev/null)" || return 1
+  jq -e '.loggedIn == true and .authMethod == "claude.ai"' \
+    <<<"$status" >/dev/null 2>&1
+}
+
+start_rc() {
+  local args=(remote-control --name "${CLAUDE_RC_NAME:-$(hostname)}" --spawn "${CLAUDE_RC_SPAWN_MODE:-same-dir}")
+  if [[ -n "${CLAUDE_PERMISSION_MODE:-}" && "${CLAUDE_PERMISSION_MODE}" != "default" ]]; then
+    args+=(--permission-mode "$CLAUDE_PERMISSION_MODE")
+  fi
+  [[ -n "${CLAUDE_RC_CAPACITY:-}" ]] && args+=(--capacity "$CLAUDE_RC_CAPACITY")
+  # shellcheck disable=SC2206 # intentional word splitting of user-supplied extra args
+  [[ -n "${CLAUDE_RC_EXTRA_ARGS:-}" ]] && args+=(${CLAUDE_RC_EXTRA_ARGS})
+
+  log "Starting Remote Control: claude ${args[*]}"
+  # Run inside tmux so the CLI gets a real TTY and you can attach to it:
+  #   docker compose exec -u claude claude tmux attach -t remote-control
+  # The pane starts idle so its output is captured to $RC_LOG from the first byte.
+  tmux new-session -d -s "$RC_SESSION" -c "$WORKSPACE" -x 200 -y 50 "sleep infinity"
+  tmux pipe-pane -t "$RC_SESSION" -o "cat >> $RC_LOG"
+  tmux respawn-pane -k -t "$RC_SESSION" -c "$WORKSPACE" \
+    "$(printf '%q ' env -u ANTHROPIC_API_KEY -u CLAUDE_CODE_OAUTH_TOKEN "$CLAUDE_BIN" "${args[@]}")"
+}
+
+rc_running() {
+  tmux has-session -t "$RC_SESSION" 2>/dev/null \
+    && [[ "$(tmux display-message -p -t "$RC_SESSION" '#{pane_dead}' 2>/dev/null)" != "1" ]]
+}
+
+shutdown() {
+  log "Stopping..."
+  tmux kill-server 2>/dev/null || true
+  exit 0
+}
+trap shutdown TERM INT
+
+if ! is_true "${CLAUDE_REMOTE_CONTROL:-false}"; then
+  log "Ready. Remote Control is off (CLAUDE_REMOTE_CONTROL=false)."
+  log "Open a session with: docker compose exec -u claude claude claude"
+  sleep infinity &
+  wait $!
+  exit 0
+fi
+
+warned_login=0
+while true; do
+  if ! rc_running; then
+    if logged_in_for_rc; then
+      warned_login=0
+      tmux kill-session -t "$RC_SESSION" 2>/dev/null || true
+      start_rc
+    elif [[ $warned_login -eq 0 ]]; then
+      log "Remote Control is on but no claude.ai login was found. Log in once with:"
+      log "  docker compose exec -u claude claude claude auth login"
+      log "(API keys and CLAUDE_CODE_OAUTH_TOKEN can't be used for Remote Control.) Waiting for login..."
+      warned_login=1
+    fi
+  fi
+  sleep 15 &
+  wait $!
+done
