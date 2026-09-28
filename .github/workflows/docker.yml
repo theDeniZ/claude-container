@@ -1,0 +1,118 @@
+name: Build & publish image
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+    paths-ignore: ["**.md", ".env.example"]
+  pull_request:
+  schedule:
+    # Nightly rebuild picks up the newest Claude Code CLI and base image fixes.
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+    inputs:
+      claude_version:
+        description: Claude Code version to install (latest, stable or X.Y.Z)
+        default: latest
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Lint shell scripts
+        run: shellcheck -x rootfs/usr/local/bin/*
+
+      - name: Lowercase image name
+        run: echo "IMAGE=${REGISTRY}/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      # Build for the runner's arch first to smoke-test and learn the exact CLI
+      # version, then build every arch with that same pinned version.
+      - name: Build test image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: claude-container:test
+          build-args: CLAUDE_VERSION=${{ inputs.claude_version || 'latest' }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Smoke test
+        id: smoke
+        run: |
+          set -euxo pipefail
+          version="$(docker run --rm --entrypoint /home/claude/.local/bin/claude claude-container:test --version | awk '{print $1}')"
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+ ]]
+          echo "claude_version=$version" >> "$GITHUB_OUTPUT"
+
+          mkdir -p ws && sudo chown 1234:1234 ws
+          docker run -d --name smoke -e PUID=1234 -e PGID=1234 -v "$PWD/ws:/workspace" claude-container:test
+          sleep 5
+          docker logs smoke
+          # UID/GID remapping
+          [[ "$(docker exec -u claude smoke id -u)" == "1234" ]]
+          [[ "$(docker exec -u claude smoke id -g)" == "1234" ]]
+          # Wrapper drops root to the claude user
+          docker exec smoke claude --version
+          # Workspace trust was written to the persistent config dir
+          docker exec -u claude smoke jq -e '.projects["/workspace"].hasTrustDialogAccepted' /home/claude/.claude/.claude.json
+          # Health check: healthy with Remote Control off...
+          docker exec smoke healthcheck
+          docker rm -f smoke
+
+          # ...and unhealthy with Remote Control on but no login.
+          docker run -d --name smoke-rc -e CLAUDE_REMOTE_CONTROL=true claude-container:test
+          sleep 5
+          docker logs smoke-rc | grep -q "no claude.ai login"
+          if docker exec smoke-rc healthcheck; then echo "expected unhealthy"; exit 1; fi
+          docker rm -f smoke-rc
+
+      - name: Image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=cli-${{ steps.smoke.outputs.claude_version }},enable={{is_default_branch}}
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,format=short
+            type=ref,event=pr
+          labels: |
+            dev.claude-code.version=${{ steps.smoke.outputs.claude_version }}
+
+      - name: Log in to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push (multi-arch)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: CLAUDE_VERSION=${{ steps.smoke.outputs.claude_version }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

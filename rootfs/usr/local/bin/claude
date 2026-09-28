@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# Wrapper so `docker compose exec claude claude` never runs Claude as root:
+# root is switched to the claude user; everyone else goes straight to the CLI.
+CLAUDE_BIN="${CLAUDE_BIN:-/home/claude/.local/bin/claude}"
+if [[ "$(id -u)" == "0" ]]; then
+  exec gosu claude "$CLAUDE_BIN" "$@"
+fi
+exec "$CLAUDE_BIN" "$@"

@@ -1,0 +1,39 @@
+# Claude Code in a container.
+#   cp .env.example .env   # adjust WORKSPACE_PATH, PUID/PGID, ...
+#   docker compose up -d
+#   docker compose exec -u claude claude claude
+# To build the image locally instead of pulling it, add -f docker-compose.build.yml.
+services:
+  claude:
+    image: ${CLAUDE_IMAGE:-ghcr.io/thedeniz/claude-container:latest}
+    container_name: ${CONTAINER_NAME:-claude}
+    # Also the default Remote Control name shown in the Claude apps.
+    hostname: ${CLAUDE_RC_NAME:-claude-container}
+    restart: unless-stopped
+    init: false # tini is already the entrypoint
+    stdin_open: true
+    tty: true
+    environment:
+      PUID: ${PUID:-1000}
+      PGID: ${PGID:-1000}
+      TZ: ${TZ:-UTC}
+      CLAUDE_REMOTE_CONTROL: ${CLAUDE_REMOTE_CONTROL:-false}
+      CLAUDE_RC_NAME: ${CLAUDE_RC_NAME:-claude-container}
+      CLAUDE_RC_SPAWN_MODE: ${CLAUDE_RC_SPAWN_MODE:-same-dir}
+      CLAUDE_RC_CAPACITY: ${CLAUDE_RC_CAPACITY:-}
+      CLAUDE_RC_EXTRA_ARGS: ${CLAUDE_RC_EXTRA_ARGS:-}
+      CLAUDE_PERMISSION_MODE: ${CLAUDE_PERMISSION_MODE:-default}
+      CLAUDE_AUTO_UPDATE: ${CLAUDE_AUTO_UPDATE:-false}
+      CLAUDE_TRUST_WORKSPACE: ${CLAUDE_TRUST_WORKSPACE:-true}
+      # Optional non-interactive auth (not usable for Remote Control).
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
+      GH_TOKEN: ${GH_TOKEN:-}
+    volumes:
+      - ${WORKSPACE_PATH:-./workspace}:/workspace
+      # Auth, settings, sessions and project trust. A named volume by default;
+      # set CLAUDE_CONFIG_PATH to a host folder (e.g. ./claude-config) instead.
+      - ${CLAUDE_CONFIG_PATH:-claude-config}:/home/claude/.claude
+
+volumes:
+  claude-config:
