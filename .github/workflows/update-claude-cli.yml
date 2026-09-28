@@ -1,0 +1,72 @@
+name: Update Claude Code CLI
+
+# Nightly: if a newer Claude Code CLI is out, open (or update) a PR that bumps
+# CLAUDE_VERSION in the Dockerfile. Same major version -> "fix(deps):" (patch
+# release); new major version -> "feat(deps)!:" (major release) for review.
+#
+# PRs opened with the default GITHUB_TOKEN don't trigger other workflows, so CI
+# won't run on them. Add a BOT_TOKEN secret (fine-grained PAT or GitHub App
+# token with contents + pull-requests write) to get CI on the bump PRs.
+# Also enable Settings -> Actions -> "Allow GitHub Actions to create and approve pull requests".
+
+on:
+  schedule:
+    - cron: "23 4 * * *"
+  workflow_dispatch:
+
+env:
+  # npm dist-tag to follow: latest | stable
+  CLAUDE_CHANNEL: latest
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compare versions
+        id: v
+        run: |
+          set -euo pipefail
+          current="$(sed -n 's/^ARG CLAUDE_VERSION=//p' Dockerfile)"
+          latest="$(npm view "@anthropic-ai/claude-code@${CLAUDE_CHANNEL}" version)"
+          echo "current=$current latest=$latest"
+          newest="$(printf '%s\n%s\n' "$current" "$latest" | sort -V | tail -1)"
+          if [[ "$latest" == "$current" || "$newest" != "$latest" ]]; then
+            echo "update=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [[ "${current%%.*}" != "${latest%%.*}" ]]; then
+            type='feat(deps)!'
+          else
+            type='fix(deps)'
+          fi
+          sed -i "s/^ARG CLAUDE_VERSION=.*/ARG CLAUDE_VERSION=${latest}/" Dockerfile
+          {
+            echo "update=true"
+            echo "current=$current"
+            echo "latest=$latest"
+            echo "title=${type}: bump Claude Code CLI from ${current} to ${latest}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Open pull request
+        if: steps.v.outputs.update == 'true'
+        uses: peter-evans/create-pull-request@v7
+        with:
+          token: ${{ secrets.BOT_TOKEN || github.token }}
+          branch: deps/claude-code-cli
+          delete-branch: true
+          commit-message: ${{ steps.v.outputs.title }}
+          title: ${{ steps.v.outputs.title }}
+          labels: dependencies
+          body: |
+            Bumps the Claude Code CLI baked into the image from `${{ steps.v.outputs.current }}` to `${{ steps.v.outputs.latest }}` (npm dist-tag `${{ env.CLAUDE_CHANNEL }}`).
+
+            Changelog: https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md
+
+            Merging releases a new image version. The PR title decides the bump: `fix(deps):` → patch.
+            If this CLI version changes behaviour users rely on, retitle it `feat(deps):` (minor) or `feat(deps)!:` (major) before squash-merging.
