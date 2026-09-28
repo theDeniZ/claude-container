@@ -61,9 +61,10 @@ Claude app or [claude.ai/code](https://claude.ai/code) and pick the environment.
 - It needs a claude.ai login made with `claude auth login` (see above). API keys and
   `CLAUDE_CODE_OAUTH_TOKEN` can't be used for Remote Control. Until you log in, the
   container waits, says so in `docker compose logs`, and reports **unhealthy**.
-- The server runs in a tmux session. To see it (e.g. its URL or a first-run prompt):
-  `docker compose exec -u claude claude tmux attach -t remote-control` (detach with
-  `Ctrl-b d`). Its output is also written to `/tmp/remote-control.log`.
+- Its terminal output (URL, errors, first-run prompts) is in `/tmp/remote-control.log`:
+  `docker compose exec claude cat /tmp/remote-control.log`. If it's stuck on a prompt,
+  set `CLAUDE_REMOTE_CONTROL=false`, answer it once with
+  `docker compose exec -u claude claude claude remote-control`, then turn it back on.
 - `CLAUDE_PERMISSION_MODE=bypassPermissions` lets Claude act without asking. The
   container is the sandbox, but Claude can still do anything your mounted workspace,
   tokens and network allow.
@@ -87,8 +88,8 @@ Every setting is an environment variable. See [`.env.example`](.env.example) for
 | `CLAUDE_TRUST_WORKSPACE` | `true` | Pre-accept the trust prompt for `/workspace` |
 | `ANTHROPIC_API_KEY` | | Optional API-key auth for normal sessions |
 | `CLAUDE_CODE_OAUTH_TOKEN` | | Optional long-lived token (`claude setup-token`) for normal sessions |
-| `GH_TOKEN` | | Token for the bundled GitHub CLI |
-| `TZ` | `UTC` | Time zone |
+| `GH_TOKEN` | | Token for `gh`, if you add it (see [Optional tools](#optional-tools)) |
+| `TZ` | `UTC` | Time zone (other than UTC needs `tzdata` added) |
 
 ### Persistent config
 
@@ -125,8 +126,28 @@ docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
 ```
 
 Build args: `CLAUDE_VERSION` (defaults to the version pinned in the `Dockerfile`; also
-`latest`, `stable` or `X.Y.Z`) and `EXTRA_APT_PACKAGES` (e.g. `"python3 nodejs"`, also
-settable in `.env`).
+`latest`, `stable` or `X.Y.Z`) and `EXTRA_APT_PACKAGES` (see below, also settable in
+`.env`).
+
+### Optional tools
+
+The published image is kept slim: it has only what Claude Code itself needs. Add
+Debian packages at build time:
+
+```dotenv
+# .env
+EXTRA_APT_PACKAGES="git gh openssh-client tmux"
+```
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
+```
+
+Without `git`, Claude still reads, edits and runs code, but has no git context
+(branch, status, diffs), can't commit and can't use worktrees
+(`CLAUDE_RC_SPAWN_MODE=worktree`). For most coding work you'll want at least `git`.
+Other common additions: `openssh-client` (git over SSH), `gh` (GitHub CLI),
+`python3`, `nodejs npm` (many MCP servers), `tzdata`, `less`.
 
 ## Versions and releases
 
@@ -178,6 +199,7 @@ GitHub release notes.
 
 ## What's inside
 
-Debian bookworm-slim plus `git`, `gh`, `curl`, `jq`, `ripgrep`, `tmux`,
-`openssh-client`, `less`, `nano`, `procps`, `unzip`, `tini` and `gosu`. Claude Code is
-installed with the official native installer.
+`debian:trixie-slim` (glibc, about 30 MB to download) plus `ca-certificates`, `jq`,
+`procps`, `gosu` and `tini`, and the Claude Code CLI (about 240 MB, most of the image),
+installed with the official native installer in a separate build stage so the installer
+and `curl` stay out of the image. Claude Code ships its own ripgrep.

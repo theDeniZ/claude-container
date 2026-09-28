@@ -6,13 +6,14 @@ set -uo pipefail
 
 is_true() { [[ "${1,,}" =~ ^(1|true|yes|on)$ ]]; }
 
-# Run the checks as the claude user (tmux sockets are per-user).
+# Run the checks as the claude user, like the CLI itself.
 if [[ "$(id -u)" == "0" ]]; then
   exec gosu claude "$0" "$@"
 fi
 
 CLAUDE_BIN="${CLAUDE_BIN:-$HOME/.local/bin/claude}"
 CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+RC_PID_FILE="/tmp/remote-control.pid"
 
 fail() { echo "UNHEALTHY: $*"; exit 1; }
 
@@ -20,10 +21,10 @@ fail() { echo "UNHEALTHY: $*"; exit 1; }
 [[ -w "$CONFIG_DIR" ]] || fail "config dir $CONFIG_DIR is not writable"
 
 if is_true "${CLAUDE_REMOTE_CONTROL:-false}"; then
-  tmux has-session -t remote-control 2>/dev/null \
+  pid="$(cat "$RC_PID_FILE" 2>/dev/null)" \
     || fail "Remote Control is not running (logged in? see 'docker compose logs')"
-  [[ "$(tmux display-message -p -t remote-control '#{pane_dead}' 2>/dev/null)" != "1" ]] \
-    || fail "Remote Control process exited"
+  read -r _ _ state _ 2>/dev/null < "/proc/$pid/stat" && [[ "$state" != "Z" ]] \
+    || fail "Remote Control process exited (see /tmp/remote-control.log)"
   echo "OK: Remote Control running"
 else
   echo "OK"

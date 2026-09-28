@@ -1,11 +1,27 @@
 # syntax=docker/dockerfile:1.7
 # Base image is pinned by digest; Dependabot opens PRs when it changes.
-FROM debian:bookworm-slim@sha256:3783cc01769c7b2b1b83a5c5ad96c815348e28ed7da68e2e3687004faa906251
+# Debian (glibc) keeps the Claude CLI and anything it runs fully compatible.
+
+# --- Install Claude Code (curl and the installer stay out of the final image) ---
+FROM debian:trixie-slim@sha256:a99cfc517144bc59b1978475ec53b46ecabec7e43635402ee5b77cc54cd1b20a AS claude
 
 # Claude Code version baked into the image. Pinned so every release is
 # reproducible; .github/workflows/update-claude-cli.yml opens a PR to bump it.
 ARG CLAUDE_VERSION=2.1.283
-# Extra Debian packages to bake into the image (space separated).
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ca-certificates curl \
+ && rm -rf /var/lib/apt/lists/* \
+ && useradd --uid 1000 --create-home claude
+
+USER claude
+RUN curl -fsSL https://claude.ai/install.sh | bash -s -- "${CLAUDE_VERSION}" \
+ && /home/claude/.local/bin/claude --version
+
+# --- Runtime image ---
+FROM debian:trixie-slim@sha256:a99cfc517144bc59b1978475ec53b46ecabec7e43635402ee5b77cc54cd1b20a
+
+# Optional Debian packages, e.g. "git gh openssh-client tmux" (space separated).
 ARG EXTRA_APT_PACKAGES=""
 
 LABEL org.opencontainers.image.title="claude-container" \
@@ -19,18 +35,8 @@ ENV DEBIAN_FRONTEND=noninteractive \
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
-      bash ca-certificates curl git gnupg gosu jq less openssh-client procps \
-      ripgrep tini tmux unzip nano ${EXTRA_APT_PACKAGES} \
- # GitHub CLI
- && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
-      -o /usr/share/keyrings/githubcli-archive-keyring.gpg \
- && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
-      > /etc/apt/sources.list.d/github-cli.list \
- && apt-get update \
- && apt-get install -y --no-install-recommends gh \
- && rm -rf /var/lib/apt/lists/* \
- # Workspace is bind-mounted with the host owner; don't let git refuse it.
- && git config --system --add safe.directory '*'
+      ca-certificates gosu jq procps tini ${EXTRA_APT_PACKAGES} \
+ && rm -rf /var/lib/apt/lists/*
 
 # Unprivileged user; UID/GID are remapped at startup from PUID/PGID.
 RUN groupadd --gid 1000 claude \
@@ -38,18 +44,18 @@ RUN groupadd --gid 1000 claude \
  && mkdir -p /workspace /home/claude/.claude \
  && chown claude:claude /workspace /home/claude/.claude
 
-# Install Claude Code with the official native installer, owned by the runtime
-# user so `claude update` (and CLAUDE_AUTO_UPDATE) can replace it in place.
-USER claude
-RUN curl -fsSL https://claude.ai/install.sh | bash -s -- "${CLAUDE_VERSION}" \
- && /home/claude/.local/bin/claude --version
-USER root
-
+# Owned by the runtime user so `claude update` (CLAUDE_AUTO_UPDATE) works in place.
+COPY --from=claude --chown=claude:claude /home/claude/.local /home/claude/.local
 COPY --chmod=0755 rootfs/usr/local/bin/ /usr/local/bin/
 
 ENV PATH=/usr/local/bin:/home/claude/.local/bin:$PATH \
     CLAUDE_CONFIG_DIR=/home/claude/.claude \
-    CLAUDE_BIN=/home/claude/.local/bin/claude
+    CLAUDE_BIN=/home/claude/.local/bin/claude \
+    # The workspace is bind-mounted with the host owner; if git is installed,
+    # don't let it refuse the repo. (Env-based config needs no git at build time.)
+    GIT_CONFIG_COUNT=1 \
+    GIT_CONFIG_KEY_0=safe.directory \
+    GIT_CONFIG_VALUE_0=*
 
 WORKDIR /workspace
 VOLUME ["/home/claude/.claude"]
