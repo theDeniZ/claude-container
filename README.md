@@ -3,14 +3,14 @@
 Run [Claude Code](https://docs.claude.com/en/docs/claude-code) in a container with:
 
 - your project mounted at `/workspace`
-- the latest Claude Code CLI (image rebuilt nightly, optional update on start)
+- a pinned, up-to-date Claude Code CLI (a bot opens a bump PR for every new CLI release)
 - login, settings and sessions kept in a volume or a folder you choose
 - an optional background **Remote Control** server, so you can drive Claude from
   [claude.ai/code](https://claude.ai/code) or the Claude mobile app
 - a built-in health check
 - files written with your own UID/GID, not root
 
-Image: `ghcr.io/thedeniz/claude-container` (linux/amd64, linux/arm64)
+Image: `ghcr.io/thedeniz/claude-container` (linux/amd64, linux/arm64). See [Versions and releases](#versions-and-releases).
 
 ## Quick start
 
@@ -103,8 +103,9 @@ CLAUDE_CONFIG_PATH=./claude-config
 
 ### Updates
 
-- **Image (default):** CI rebuilds and republishes the image every night with the
-  latest CLI. Update with `docker compose pull && docker compose up -d`.
+- **Image (default):** each release pins one Claude Code CLI version. Upgrade by
+  pulling a newer tag (`docker compose pull && docker compose up -d` when you follow
+  `latest` or a major/minor tag).
 - **In place:** `CLAUDE_AUTO_UPDATE=true` runs `claude update` on every start and lets
   the CLI update itself while it runs.
 
@@ -123,21 +124,57 @@ is healthy when:
 docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
 ```
 
-Build args: `CLAUDE_VERSION` (`latest`, `stable` or `X.Y.Z`) and `EXTRA_APT_PACKAGES`
-(e.g. `"python3 nodejs"`), both settable in `.env`.
+Build args: `CLAUDE_VERSION` (defaults to the version pinned in the `Dockerfile`; also
+`latest`, `stable` or `X.Y.Z`) and `EXTRA_APT_PACKAGES` (e.g. `"python3 nodejs"`, also
+settable in `.env`).
 
-## Image tags
+## Versions and releases
 
-Published by [`.github/workflows/docker.yml`](.github/workflows/docker.yml):
+The image has one version, `X.Y.Z`, set by
+[semantic-release](https://semantic-release.gitbook.io/) from
+[conventional commits](https://www.conventionalcommits.org/) on `main`. A published
+`X.Y.Z` image is never rebuilt or overwritten.
 
-| Tag | When |
+| Commit type (squash-merged PR title) | Release |
 |---|---|
-| `latest` | every push to `main` and every nightly build |
-| `cli-X.Y.Z` | the Claude Code version inside |
-| `sha-<commit>` | every build |
-| `X.Y.Z`, `X.Y` | git tags `vX.Y.Z` |
+| `fix:`, `perf:`, e.g. `fix(deps): bump Claude Code CLI …` | patch |
+| `feat:` | minor |
+| `feat!:` or a `BREAKING CHANGE:` footer | major |
+| `chore:`, `ci:`, `docs:`, `refactor:`, `test:`, `build:` | none |
 
-Pull requests are built and smoke-tested but not pushed.
+Dependencies are pinned and bumped through pull requests:
+
+- **Claude Code CLI:** `ARG CLAUDE_VERSION` in the `Dockerfile`.
+  [`update-claude-cli.yml`](.github/workflows/update-claude-cli.yml) checks npm every
+  night and opens or updates a `fix(deps):` PR (`feat(deps)!:` for a new CLI major).
+  Retitle it `feat`/`feat!` if the new CLI changes behaviour users rely on.
+- **Base image** (pinned by digest) and **GitHub Actions**: Dependabot, as `fix(deps):`
+  and `chore(deps):` respectively.
+
+Flow: bump PR → CI builds and smoke-tests → squash-merge → semantic-release tags
+`vX.Y.Z` and writes the GitHub release → the image is built and pushed.
+
+### Image tags
+
+| Tag | Moves? |
+|---|---|
+| `X.Y.Z` | never |
+| `X.Y`, `X` | to the newest matching release |
+| `latest` | to the newest release |
+
+The Claude Code version inside is in the image label `dev.claude-code.version` and in the
+GitHub release notes.
+
+### Repository setup
+
+- Merge PRs with **squash** and use the PR title as the commit message (a check makes
+  sure PR titles are conventional commits).
+- Settings → Actions → General: allow GitHub Actions to create pull requests (for the
+  CLI bump PRs).
+- Optional: a `BOT_TOKEN` secret (fine-grained PAT or GitHub App token with contents and
+  pull-requests write) so CI also runs on the CLI bump PRs. PRs opened with the
+  default token don't trigger workflows.
+- After the first release, make the GHCR package public if others should pull it.
 
 ## What's inside
 

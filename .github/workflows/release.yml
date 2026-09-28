@@ -1,0 +1,51 @@
+name: Release
+
+# semantic-release reads the conventional commits since the last tag:
+#   fix: / perf:           -> patch   (e.g. a compatible Claude Code CLI bump)
+#   feat:                  -> minor
+#   feat!: / BREAKING CHANGE: -> major
+#   chore:, ci:, docs:, refactor:, test:, build: -> no release
+# On a new version it tags vX.Y.Z, publishes a GitHub release and builds the image.
+
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+    outputs:
+      published: ${{ steps.semrel.outputs.new_release_published }}
+      version: ${{ steps.semrel.outputs.new_release_version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - id: semrel
+        uses: cycjimmy/semantic-release-action@v4
+        with:
+          semantic_version: 24
+          extra_plugins: |
+            conventional-changelog-conventionalcommits@8
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  image:
+    needs: release
+    if: needs.release.outputs.published == 'true'
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/docker.yml
+    with:
+      version: ${{ needs.release.outputs.version }}
