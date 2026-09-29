@@ -22,7 +22,7 @@ fail() { echo "UNHEALTHY: $*"; exit 1; }
 
 if is_true "${CLAUDE_REMOTE_CONTROL:-false}"; then
   pid="$(cat "$RC_PID_FILE" 2>/dev/null)" \
-    || fail "Remote Control is not running (logged in? see 'docker compose logs')"
+    || fail "Remote Control is not running (setup needed? see 'docker compose logs')"
   state=""
   read -r _ _ state _ 2>/dev/null < "/proc/$pid/stat"
   if [[ -z "$state" || "$state" == "Z" ]]; then
