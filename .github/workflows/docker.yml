@@ -110,7 +110,7 @@ jobs:
           # ...and unhealthy with Remote Control on but no login.
           docker run -d --name smoke-rc -e CLAUDE_REMOTE_CONTROL=true claude-container:test
           sleep 5
-          docker logs smoke-rc | grep -q "no claude.ai login"
+          grep -q "needs a one-time setup" <<<"$(docker logs smoke-rc 2>&1)"
           if docker exec smoke-rc healthcheck; then echo "expected unhealthy"; exit 1; fi
           docker rm -f smoke-rc
 

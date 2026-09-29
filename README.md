@@ -58,13 +58,17 @@ Then run `docker compose up -d`. A `claude remote-control` server starts in the
 background in `/workspace` and is restarted if it exits. Open the **Code** tab in the
 Claude app or [claude.ai/code](https://claude.ai/code) and pick the environment.
 
-- It needs a claude.ai login made with `claude auth login` (see above). API keys and
-  `CLAUDE_CODE_OAUTH_TOKEN` can't be used for Remote Control. Until you log in, the
-  container waits, says so in `docker compose logs`, and reports **unhealthy**.
-- Its terminal output (URL, errors, first-run prompts) is in `/tmp/remote-control.log`:
-  `docker compose exec claude cat /tmp/remote-control.log`. If it's stuck on a prompt,
-  set `CLAUDE_REMOTE_CONTROL=false`, answer it once with
-  `docker compose exec -u claude claude claude remote-control`, then turn it back on.
+- It needs a one-time setup. Until it's done, nothing is started: the container
+  prints the steps in `docker compose logs` and reports **unhealthy**.
+  1. Log in with a claude.ai account: `docker compose exec -u claude claude claude auth login`.
+     API keys and `CLAUDE_CODE_OAUTH_TOKEN` can't be used for Remote Control.
+  2. Start Remote Control once, answer **y** to "Enable Remote Control?", then press Ctrl+C:
+     `docker compose exec -u claude claude claude remote-control`.
+  3. Restart the container: `docker compose restart claude`.
+
+  Both are saved in the config volume, so this is needed only once.
+- Its terminal output (URL, errors) is in `/tmp/remote-control.log`:
+  `docker compose exec claude cat /tmp/remote-control.log`.
 - `CLAUDE_PERMISSION_MODE=bypassPermissions` lets Claude act without asking. The
   container is the sandbox, but Claude can still do anything your mounted workspace,
   tokens and network allow.
