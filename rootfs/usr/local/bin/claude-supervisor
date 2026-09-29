@@ -127,7 +127,12 @@ start_rc() {
 
 shutdown() {
   log "Stopping..."
-  [[ -n "${rc_pid:-}" ]] && kill "$rc_pid" 2>/dev/null
+  if [[ -n "${rc_pid:-}" ]]; then
+    kill -TERM "$rc_pid" 2>/dev/null
+    # Exiting now would take tini and the whole container down, SIGKILLing the
+    # CLI before it can deregister and close its sessions. Let it finish.
+    wait "$rc_pid" 2>/dev/null || true
+  fi
   exit 0
 }
 trap shutdown TERM INT

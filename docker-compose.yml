@@ -11,6 +11,8 @@ services:
     hostname: ${CLAUDE_RC_NAME:-claude-container}
     restart: unless-stopped
     init: false # tini is already the entrypoint
+    # Time for Remote Control to deregister and close its sessions on stop.
+    stop_grace_period: 30s
     stdin_open: true
     tty: true
     environment:
