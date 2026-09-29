@@ -47,6 +47,13 @@ if is_true "${CLAUDE_TRUST_WORKSPACE:-true}"; then
     || log "WARNING: could not mark $WORKSPACE as trusted in $STATE_FILE"
 fi
 
+if is_true "${CLAUDE_REMOTE_CONTROL:-false}"; then
+  # Setting CLAUDE_REMOTE_CONTROL is the consent; skip the "Enable Remote
+  # Control? (y/n)" prompt, which would block forever without a terminal.
+  update_json "$STATE_FILE" '.remoteDialogSeen = true' \
+    || log "WARNING: could not mark Remote Control as enabled in $STATE_FILE"
+fi
+
 if [[ "${CLAUDE_PERMISSION_MODE:-default}" == "bypassPermissions" ]]; then
   # The container is the sandbox; skip the interactive "are you sure" prompt.
   SETTINGS_FILE="$CONFIG_DIR/settings.json"

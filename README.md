@@ -62,7 +62,8 @@ Claude app or [claude.ai/code](https://claude.ai/code) and pick the environment.
   `CLAUDE_CODE_OAUTH_TOKEN` can't be used for Remote Control. Until you log in, the
   container waits, says so in `docker compose logs`, and reports **unhealthy**.
 - Its terminal output (URL, errors, first-run prompts) is in `/tmp/remote-control.log`:
-  `docker compose exec claude cat /tmp/remote-control.log`. If it's stuck on a prompt,
+  `docker compose exec claude cat /tmp/remote-control.log`. The container accepts the
+  "Enable Remote Control?" prompt for you. If it's stuck on some other prompt,
   set `CLAUDE_REMOTE_CONTROL=false`, answer it once with
   `docker compose exec -u claude claude claude remote-control`, then turn it back on.
 - `CLAUDE_PERMISSION_MODE=bypassPermissions` lets Claude act without asking. The
