@@ -13,6 +13,8 @@ is_true() { [[ "${1,,}" =~ ^(1|true|yes|on)$ ]]; }
 
 CLAUDE_BIN="${CLAUDE_BIN:-$HOME/.local/bin/claude}"
 RC_PID_FILE="/tmp/remote-control.pid"
+RC_LOG="/tmp/remote-control.log"
+RC_MODE="${CLAUDE_RC_MODE:-session}"
 JSON=0
 [[ "${1:-}" == "--json" ]] && JSON=1
 
@@ -38,6 +40,11 @@ rc_uptime=0
 if pid="$(cat "$RC_PID_FILE" 2>/dev/null)" && [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
   rc_pid="$pid"
   rc_uptime="$(ps -o etimes= -p "$pid" | tr -d ' ')"
+fi
+# In session mode the session's link is in its terminal output.
+rc_url=""
+if [[ -n "$rc_pid" && "$RC_MODE" == session ]]; then
+  rc_url="$(grep -aoE 'https://claude\.ai/code/session_[A-Za-z0-9_-]+' "$RC_LOG" 2>/dev/null | tail -1)"
 fi
 
 # Remote Control starts each session as its own `claude` process with
@@ -68,11 +75,13 @@ done < <(ps -u "$(id -u)" -o pid=,etimes=,args= 2>/dev/null)
 if (( JSON )); then
   jq -n --arg version "$version" --argjson auth "$auth" --argjson enabled "$rc_enabled" \
     --arg pid "$rc_pid" --arg up "$rc_uptime" --argjson sessions "$sessions" --argjson interactive "$interactive" \
-    --arg name "${CLAUDE_RC_NAME:-$(hostname)}" --arg spawn "${CLAUDE_RC_SPAWN_MODE:-same-dir}" \
+    --arg name "${CLAUDE_RC_NAME:-$(hostname)}" --arg mode "$RC_MODE" --arg url "$rc_url" \
+    --arg spawn "${CLAUDE_RC_SPAWN_MODE:-same-dir}" \
     --arg perm "${CLAUDE_PERMISSION_MODE:-default}" \
     '{version: $version, auth: $auth,
       remoteControl: {enabled: $enabled, running: ($pid != ""), pid: (if $pid == "" then null else ($pid | tonumber) end),
-                      uptime: ($up | tonumber), name: $name, spawnMode: $spawn, permissionMode: $perm,
+                      uptime: ($up | tonumber), name: $name, mode: $mode,
+                      url: (if $url == "" then null else $url end), spawnMode: $spawn, permissionMode: $perm,
                       sessions: $sessions},
       interactiveSessions: $interactive}'
   exit 0
@@ -90,7 +99,13 @@ if [[ "$rc_enabled" != true ]]; then
 elif [[ -z "$rc_pid" ]]; then
   printf '%-16s %s\n' "Remote Control" "not running (setup needed? see 'docker compose logs')"
 else
-  printf '%-16s %s\n' "Remote Control" "running for $(duration "$rc_uptime") as \"${CLAUDE_RC_NAME:-$(hostname)}\" (spawn: ${CLAUDE_RC_SPAWN_MODE:-same-dir}, permissions: ${CLAUDE_PERMISSION_MODE:-default})"
+  if [[ "$RC_MODE" == server ]]; then
+    detail="server, spawn: ${CLAUDE_RC_SPAWN_MODE:-same-dir}"
+  else
+    detail="session"
+  fi
+  printf '%-16s %s\n' "Remote Control" "running for $(duration "$rc_uptime") as \"${CLAUDE_RC_NAME:-$(hostname)}\" (${detail}, permissions: ${CLAUDE_PERMISSION_MODE:-default})"
+  [[ -n "$rc_url" ]] && printf '%-16s %s\n' "" "$rc_url"
 fi
 
 count="$(jq length <<<"$sessions")"
