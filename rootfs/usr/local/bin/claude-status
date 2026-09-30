@@ -1,0 +1,103 @@
+#!/usr/bin/env bash
+# Show the container's Claude status: CLI version, login, Remote Control and the
+# Claude sessions running in the container.
+#   docker compose exec claude claude-status [--json]
+set -uo pipefail
+
+# Sessions and the Remote Control PID belong to the claude user.
+if [[ "$(id -u)" == "0" ]]; then
+  exec gosu claude "$0" "$@"
+fi
+
+is_true() { [[ "${1,,}" =~ ^(1|true|yes|on)$ ]]; }
+
+CLAUDE_BIN="${CLAUDE_BIN:-$HOME/.local/bin/claude}"
+RC_PID_FILE="/tmp/remote-control.pid"
+JSON=0
+[[ "${1:-}" == "--json" ]] && JSON=1
+
+duration() {  # duration <seconds> -> 2d 3h, 3h 4m, 4m 5s
+  local s=$1
+  if (( s >= 86400 )); then printf '%dd %dh' $((s / 86400)) $((s % 86400 / 3600))
+  elif (( s >= 3600 )); then printf '%dh %dm' $((s / 3600)) $((s % 3600 / 60))
+  elif (( s >= 60 )); then printf '%dm %ds' $((s / 60)) $((s % 60))
+  else printf '%ds' "$s"
+  fi
+}
+
+# --- Gather -------------------------------------------------------------------
+version="$("$CLAUDE_BIN" --version 2>/dev/null | awk '{print $1}')"
+auth="$(env -u ANTHROPIC_API_KEY -u CLAUDE_CODE_OAUTH_TOKEN "$CLAUDE_BIN" auth status 2>/dev/null)" || true
+auth="$(jq -c '{loggedIn, authMethod, email: (.email // .account.email // null)}' <<<"$auth" 2>/dev/null \
+  || echo '{"loggedIn":false,"authMethod":null,"email":null}')"
+
+rc_enabled=false
+is_true "${CLAUDE_REMOTE_CONTROL:-false}" && rc_enabled=true
+rc_pid=""
+rc_uptime=0
+if pid="$(cat "$RC_PID_FILE" 2>/dev/null)" && [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
+  rc_pid="$pid"
+  rc_uptime="$(ps -o etimes= -p "$pid" | tr -d ' ')"
+fi
+
+# Remote Control starts each session as its own `claude` process with
+# --sdk-url and --session-id; anything else running `claude` interactively
+# (not the CLI's own helper calls) is a session opened with `docker compose exec`.
+sessions="[]"
+interactive=0
+while read -r pid etimes args; do
+  # Only the CLI itself (…/claude or …/claude/versions/X), not a shell or tool
+  # that merely has these words in its arguments.
+  [[ "${args%% *}" == *claude* ]] || continue
+  if [[ "$args" == *--sdk-url* ]]; then
+    id="$(grep -oE -- '--session-id[= ][^ ]+' <<<"$args" | head -1 | sed -E 's/--session-id[= ]//')"
+    cwd="$(readlink "/proc/$pid/cwd" 2>/dev/null || echo "?")"
+    [[ -n "$id" ]] && jq -e --arg id "$id" 'any(.id == $id)' <<<"$sessions" >/dev/null && continue
+    sessions="$(jq -c --arg id "$id" --arg pid "$pid" --arg up "$etimes" --arg cwd "$cwd" \
+      '. + [{id: $id, pid: ($pid | tonumber), uptime: ($up | tonumber), cwd: $cwd,
+             url: (if $id == "" then null else "https://claude.ai/code/" + ($id | sub("^cse_"; "session_")) end)}]' \
+      <<<"$sessions")"
+  elif [[ "$args" != *remote-control* && "$args" != *--version* && "$args" != *" auth "* \
+          && "$args" != *claude-status* && "$args" != *script\ -q* \
+          && "$(awk '{print $1}' <<<"$args")" == */claude ]]; then
+    interactive=$((interactive + 1))
+  fi
+done < <(ps -u "$(id -u)" -o pid=,etimes=,args= 2>/dev/null)
+
+# --- Output -------------------------------------------------------------------
+if (( JSON )); then
+  jq -n --arg version "$version" --argjson auth "$auth" --argjson enabled "$rc_enabled" \
+    --arg pid "$rc_pid" --arg up "$rc_uptime" --argjson sessions "$sessions" --argjson interactive "$interactive" \
+    --arg name "${CLAUDE_RC_NAME:-$(hostname)}" --arg spawn "${CLAUDE_RC_SPAWN_MODE:-same-dir}" \
+    --arg perm "${CLAUDE_PERMISSION_MODE:-default}" \
+    '{version: $version, auth: $auth,
+      remoteControl: {enabled: $enabled, running: ($pid != ""), pid: (if $pid == "" then null else ($pid | tonumber) end),
+                      uptime: ($up | tonumber), name: $name, spawnMode: $spawn, permissionMode: $perm,
+                      sessions: $sessions},
+      interactiveSessions: $interactive}'
+  exit 0
+fi
+
+printf '%-16s %s\n' "Claude Code" "${version:-unknown}"
+if jq -e '.loggedIn' <<<"$auth" >/dev/null; then
+  printf '%-16s %s\n' "Login" "$(jq -r '[.authMethod, .email] | map(select(. != null)) | join(", ")' <<<"$auth")"
+else
+  printf '%-16s %s\n' "Login" "not logged in"
+fi
+
+if [[ "$rc_enabled" != true ]]; then
+  printf '%-16s %s\n' "Remote Control" "off (CLAUDE_REMOTE_CONTROL=false)"
+elif [[ -z "$rc_pid" ]]; then
+  printf '%-16s %s\n' "Remote Control" "not running (setup needed? see 'docker compose logs')"
+else
+  printf '%-16s %s\n' "Remote Control" "running for $(duration "$rc_uptime") as \"${CLAUDE_RC_NAME:-$(hostname)}\" (spawn: ${CLAUDE_RC_SPAWN_MODE:-same-dir}, permissions: ${CLAUDE_PERMISSION_MODE:-default})"
+fi
+
+count="$(jq length <<<"$sessions")"
+printf '%-16s %s\n' "Remote sessions" "$count"
+while IFS=$'\t' read -r id up cwd url; do
+  [[ -n "$id" || -n "$up" ]] || continue
+  printf '  %-30s up %-8s %s\n' "${id:-?}" "$(duration "$up")" "$cwd"
+  [[ "$url" != "null" ]] && printf '  %-30s %s\n' "" "$url"
+done < <(jq -r '.[] | [.id, .uptime, .cwd, (.url // "null")] | @tsv' <<<"$sessions")
+printf '%-16s %s\n' "Local sessions" "$interactive"
