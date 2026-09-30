@@ -190,6 +190,24 @@ Without `git`, Claude still reads, edits and runs code, but has no git context
 Other common additions: `openssh-client` (git over SSH), `gh` (GitHub CLI),
 `python3`, `nodejs npm` (many MCP servers), `tzdata`, `less`.
 
+### Possible expansions
+
+Not built yet: ideas for making tools easier to get without giving up updatable
+images.
+
+- **Choose a feature set up front (preferred).** Decide which tools you need when you
+  set the container up, commit to that choice, and switch deliberately later. The
+  options below should support that, not replace it.
+- **Several published images.** Release a few variants from the same repo and
+  version, e.g. `X.Y.Z` (slim), `X.Y.Z-git` (git, openssh-client, gh) and
+  `X.Y.Z-full` (plus python3, nodejs, …). Changing the feature set then means changing
+  the image tag, with no local build, and every variant keeps getting updates.
+- **Remember and reinstall (last resort).** Record the packages installed at runtime
+  in the config volume and reinstall them on every start, before Remote Control
+  starts. This makes tools survive image updates, but at a cost: every start gets
+  slower and needs network access, root is needed at runtime, and the tool set can
+  drift away from what the image was tested with.
+
 ## Versions and releases
 
 The image has one version, `X.Y.Z`, set by
