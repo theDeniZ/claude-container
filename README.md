@@ -197,7 +197,7 @@ The image has one version, `X.Y.Z`, set by
 [conventional commits](https://www.conventionalcommits.org/) on `main`. A published
 `X.Y.Z` image is never rebuilt or overwritten.
 
-| Commit type (squash-merged PR title) | Release |
+| Commit type | Release |
 |---|---|
 | `fix:`, `perf:`, e.g. `fix(deps): bump Claude Code CLI …` | patch |
 | `feat:` | minor |
@@ -209,11 +209,11 @@ Dependencies are pinned and bumped through pull requests:
 - **Claude Code CLI:** `ARG CLAUDE_VERSION` in the `Dockerfile`.
   [`update-claude-cli.yml`](.github/workflows/update-claude-cli.yml) checks npm every
   night and opens or updates a `fix(deps):` PR (`feat(deps)!:` for a new CLI major).
-  Retitle it `feat`/`feat!` if the new CLI changes behaviour users rely on.
+  Reword its commit to `feat`/`feat!` if the new CLI changes behaviour users rely on.
 - **Base image** (pinned by digest) and **GitHub Actions**: Dependabot, as `fix(deps):`
   and `chore(deps):` respectively.
 
-Flow: bump PR → CI builds and smoke-tests → squash-merge → semantic-release tags
+Flow: bump PR → CI builds and smoke-tests → rebase-merge → semantic-release tags
 `vX.Y.Z` and writes the GitHub release → the image is built and pushed.
 
 ### Image tags
@@ -229,8 +229,10 @@ GitHub release notes.
 
 ### Repository setup
 
-- Merge PRs with **squash** and use the PR title as the commit message (a check makes
-  sure PR titles are conventional commits).
+- Merge PRs with **rebase**. Every commit lands on `main` as-is and semantic-release
+  reads each one, so every commit must be a conventional commit. The
+  "Commit messages" check lints all of a PR's commits
+  ([`.commitlintrc.json`](.commitlintrc.json)).
 - Settings → Actions → General: allow GitHub Actions to create pull requests (for the
   CLI bump PRs).
 - Optional: a `BOT_TOKEN` secret (fine-grained PAT or GitHub App token with contents and

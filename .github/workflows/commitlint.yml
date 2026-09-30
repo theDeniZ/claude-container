@@ -1,0 +1,23 @@
+name: Commit messages
+
+# PRs are rebase-merged, so every commit lands on main as-is and
+# semantic-release reads each one to decide the release. Check them all
+# against conventional commits (config: .commitlintrc.json).
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  commitlint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: wagoid/commitlint-github-action@v6
+        with:
+          configFile: .commitlintrc.json
