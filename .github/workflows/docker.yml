@@ -105,6 +105,8 @@ jobs:
           docker exec -u claude smoke jq -e '.projects["/workspace"].hasTrustDialogAccepted' /home/claude/.claude/.claude.json
           # Health check: healthy with Remote Control off...
           docker exec smoke healthcheck
+          # Managed CLAUDE.md is in place with its placeholder filled in
+          docker exec smoke grep -q "Extra packages in this image: none." /etc/claude-code/CLAUDE.md
           # Status command: readable and JSON output
           docker exec smoke claude-status
           docker exec smoke claude-status --json | jq -e '.remoteControl.enabled == false and .remoteControl.sessions == []'

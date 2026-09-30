@@ -106,6 +106,20 @@ back it up or share it between hosts:
 CLAUDE_CONFIG_PATH=./claude-config
 ```
 
+### CLAUDE.md files
+
+Claude reads three instruction files, and each has its own place:
+
+| File | Who owns it | Kept |
+|---|---|---|
+| `/etc/claude-code/CLAUDE.md` | the image: describes the container (paths, what persists, installed tools) | replaced with each image update |
+| `~/.claude/CLAUDE.md` | you: personal instructions for every project | in the config volume |
+| `/workspace/CLAUDE.md` | your project | in your project, never touched by the image |
+
+The managed file lists the extra packages the image was built with, so Claude knows
+whether it has `git` and other tools. You can't edit it, and you don't need to: your
+own files add to it.
+
 ### Updates
 
 - **Image (default):** each release pins one Claude Code CLI version. Upgrade by
