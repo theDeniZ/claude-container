@@ -114,6 +114,25 @@ CLAUDE_CONFIG_PATH=./claude-config
 - **In place:** `CLAUDE_AUTO_UPDATE=true` runs `claude update` on every start and lets
   the CLI update itself while it runs.
 
+## Status
+
+```console
+$ docker compose exec claude claude-status
+Claude Code      2.1.283
+Login            claude.ai, you@example.com
+Remote Control   running for 2h 5m as "claude-container" (spawn: same-dir, permissions: default)
+Remote sessions  2
+  cse_01ABC…                     up 41m      /workspace
+                                 https://claude.ai/code/session_01ABC…
+  cse_02DEF…                     up 3m       /workspace
+                                 https://claude.ai/code/session_02DEF…
+Local sessions   1
+```
+
+**Remote sessions** are the background sessions Remote Control started for the Claude
+apps. **Local sessions** are the ones opened with `docker compose exec … claude`. Add
+`--json` for machine-readable output.
+
 ## Health check
 
 `healthcheck` runs every 30 s (`docker compose ps` shows the result). The container
@@ -122,6 +141,10 @@ is healthy when:
 1. the Claude CLI runs,
 2. the config dir is writable, and
 3. with `CLAUDE_REMOTE_CONTROL=true`, the Remote Control server is running.
+
+Its message includes the number of remote sessions, e.g.
+`OK: Remote Control running, 2 remote session(s)`
+(`docker inspect --format '{{json .State.Health}}' claude`).
 
 ## Building locally
 

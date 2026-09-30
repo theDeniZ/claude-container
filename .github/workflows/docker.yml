@@ -105,6 +105,9 @@ jobs:
           docker exec -u claude smoke jq -e '.projects["/workspace"].hasTrustDialogAccepted' /home/claude/.claude/.claude.json
           # Health check: healthy with Remote Control off...
           docker exec smoke healthcheck
+          # Status command: readable and JSON output
+          docker exec smoke claude-status
+          docker exec smoke claude-status --json | jq -e '.remoteControl.enabled == false and .remoteControl.sessions == []'
           docker rm -f smoke
 
           # ...and unhealthy with Remote Control on but no login.

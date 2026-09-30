@@ -28,7 +28,10 @@ if is_true "${CLAUDE_REMOTE_CONTROL:-false}"; then
   if [[ -z "$state" || "$state" == "Z" ]]; then
     fail "Remote Control process exited (see /tmp/remote-control.log)"
   fi
-  echo "OK: Remote Control running"
+  # Sessions Remote Control started (details: claude-status): CLI processes
+  # run with --sdk-url.
+  sessions="$(ps -u "$(id -u)" -o args= | awk '$1 ~ /claude/ && / --sdk-url/' | wc -l)"
+  echo "OK: Remote Control running, ${sessions} remote session(s)"
 else
   echo "OK"
 fi
