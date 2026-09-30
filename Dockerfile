@@ -49,6 +49,13 @@ RUN groupadd --gid 1000 claude \
 COPY --from=claude --chown=claude:claude /home/claude/.local /home/claude/.local
 COPY --chmod=0755 rootfs/usr/local/bin/ /usr/local/bin/
 
+# Managed CLAUDE.md describing the container to Claude, with this build's extra
+# packages filled in. Kept apart from the user's ~/.claude/CLAUDE.md and the
+# project's /workspace/CLAUDE.md, which the image never touches.
+COPY rootfs/etc/claude-code/ /etc/claude-code/
+RUN packages="$(for p in ${EXTRA_APT_PACKAGES}; do printf '`%s`, ' "$p"; done)" \
+ && sed -i "s|{{EXTRA_APT_PACKAGES}}|${packages%, }|; s|: \.$|: none.|" /etc/claude-code/CLAUDE.md
+
 # XDG_RUNTIME_DIR: private runtime dir for the claude user. Without it Claude
 #   keeps its messaging sockets in a shared /tmp/cc-socks owned by whoever made it first.
 # GIT_CONFIG_*: the workspace is bind-mounted with the host owner; if git is
