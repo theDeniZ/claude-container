@@ -50,13 +50,24 @@ Set in `.env`:
 
 ```dotenv
 CLAUDE_REMOTE_CONTROL=true
-CLAUDE_RC_NAME=my-server              # name shown in the Claude apps
+CLAUDE_RC_NAME=my-project             # name shown in the Claude apps
+CLAUDE_RC_MODE=session                # or server, see below
 CLAUDE_PERMISSION_MODE=default        # or acceptEdits | auto | plan | dontAsk | bypassPermissions
 ```
 
-Then run `docker compose up -d`. A `claude remote-control` server starts in the
-background in `/workspace` and is restarted if it exits. Open the **Code** tab in the
-Claude app or [claude.ai/code](https://claude.ai/code) and pick the environment.
+Then run `docker compose up -d`. Remote Control starts in `/workspace` in the background
+and is restarted if it exits. Open the **Code** tab in the Claude app or
+[claude.ai/code](https://claude.ai/code). What you find there depends on the mode:
+
+- **`session` (default):** runs `claude --remote-control <name>`. One session named
+  `CLAUDE_RC_NAME` starts with the container and is ready in the app straight away.
+  After a restart you get a new session.
+- **`server`:** runs `claude remote-control --name <name>`. It registers an
+  environment and creates sessions when you start them from the app
+  (`CLAUDE_RC_SPAWN_MODE`, `CLAUDE_RC_CAPACITY`).
+
+Several stacks can share one config folder (one login) as long as each has its own
+`CLAUDE_RC_NAME`.
 
 - It needs a one-time setup. Until it's done, nothing is started: the container
   prints the steps in `docker compose logs` and reports **unhealthy**.
@@ -83,10 +94,11 @@ Every setting is an environment variable. See [`.env.example`](.env.example) for
 | `CLAUDE_CONFIG_PATH` | `claude-config` | Docker volume name **or** host path for login/settings (`/home/claude/.claude`) |
 | `PUID` / `PGID` | `1000` | UID/GID Claude runs as. Match your host user so workspace files stay yours |
 | `CLAUDE_REMOTE_CONTROL` | `false` | Start the Remote Control server on container start |
-| `CLAUDE_RC_NAME` | `claude-container` | Remote Control name (also the container hostname) |
-| `CLAUDE_RC_SPAWN_MODE` | `same-dir` | `same-dir`, `worktree` or `session` |
-| `CLAUDE_RC_CAPACITY` | | Max concurrent remote sessions |
-| `CLAUDE_RC_EXTRA_ARGS` | | Extra flags for `claude remote-control` |
+| `CLAUDE_RC_NAME` | `claude-container` | Remote Control name (also the container hostname); unique per stack |
+| `CLAUDE_RC_MODE` | `session` | `session`: one named session at start; `server`: sessions on demand from the apps |
+| `CLAUDE_RC_SPAWN_MODE` | `same-dir` | Server mode: `same-dir`, `worktree` or `session` |
+| `CLAUDE_RC_CAPACITY` | | Server mode: max concurrent sessions |
+| `CLAUDE_RC_EXTRA_ARGS` | | Extra flags for the Remote Control command |
 | `CLAUDE_PERMISSION_MODE` | `default` | Permission mode for Remote Control sessions |
 | `CLAUDE_AUTO_UPDATE` | `false` | `true`: run `claude update` on start and allow the built-in auto-updater |
 | `CLAUDE_TRUST_WORKSPACE` | `true` | Pre-accept the trust prompt for `/workspace` |
@@ -134,7 +146,7 @@ own files add to it.
 $ docker compose exec claude claude-status
 Claude Code      2.1.283
 Login            claude.ai, you@example.com
-Remote Control   running for 2h 5m as "claude-container" (spawn: same-dir, permissions: default)
+Remote Control   running for 2h 5m as "claude-container" (server, spawn: same-dir, permissions: default)
 Remote sessions  2
   cse_01ABC…                     up 41m      /workspace
                                  https://claude.ai/code/session_01ABC…
@@ -143,8 +155,9 @@ Remote sessions  2
 Local sessions   1
 ```
 
-**Remote sessions** are the background sessions Remote Control started for the Claude
-apps. **Local sessions** are the ones opened with `docker compose exec … claude`. Add
+**Remote sessions** are the background sessions a Remote Control server started for
+the Claude apps. In session mode the Remote Control line shows that session's link
+instead. **Local sessions** are the ones opened with `docker compose exec … claude`. Add
 `--json` for machine-readable output.
 
 ## Health check

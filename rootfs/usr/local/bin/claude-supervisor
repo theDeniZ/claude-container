@@ -108,11 +108,25 @@ rc_ready() {
 }
 
 start_rc() {
-  local args=(remote-control --name "${CLAUDE_RC_NAME:-$(hostname)}" --spawn "${CLAUDE_RC_SPAWN_MODE:-same-dir}")
+  local name="${CLAUDE_RC_NAME:-$(hostname)}" args
+  case "${CLAUDE_RC_MODE:-session}" in
+    session)
+      # One named session, started now and driven from the Claude apps.
+      args=(--remote-control "$name")
+      ;;
+    server)
+      # A server that creates sessions when you start them from the apps.
+      args=(remote-control --name "$name" --spawn "${CLAUDE_RC_SPAWN_MODE:-same-dir}")
+      [[ -n "${CLAUDE_RC_CAPACITY:-}" ]] && args+=(--capacity "$CLAUDE_RC_CAPACITY")
+      ;;
+    *)
+      log "CLAUDE_RC_MODE must be 'session' or 'server', not '${CLAUDE_RC_MODE}'. Remote Control not started."
+      idle
+      ;;
+  esac
   if [[ -n "${CLAUDE_PERMISSION_MODE:-}" && "${CLAUDE_PERMISSION_MODE}" != "default" ]]; then
     args+=(--permission-mode "$CLAUDE_PERMISSION_MODE")
   fi
-  [[ -n "${CLAUDE_RC_CAPACITY:-}" ]] && args+=(--capacity "$CLAUDE_RC_CAPACITY")
   # shellcheck disable=SC2206 # intentional word splitting of user-supplied extra args
   [[ -n "${CLAUDE_RC_EXTRA_ARGS:-}" ]] && args+=(${CLAUDE_RC_EXTRA_ARGS})
 
