@@ -1,0 +1,98 @@
+name: Update pinned dependencies
+
+# Nightly: for each version pinned with an ARG in the Dockerfile, open (or
+# update) a PR when a newer release is out. A compatible bump is
+# "fix(deps):" (patch release); a new major version (or, for 0.x, a new minor
+# version) is "feat(deps)!:" (major release) for review.
+#
+# PRs opened with the default GITHUB_TOKEN don't trigger other workflows, so CI
+# won't run on them. Add a BOT_TOKEN secret (fine-grained PAT or GitHub App
+# token with contents + pull-requests write) to get CI on the bump PRs.
+# Also enable Settings -> Actions -> "Allow GitHub Actions to create and approve pull requests".
+
+on:
+  schedule:
+    - cron: "23 4 * * *"
+  workflow_dispatch:
+
+env:
+  # npm dist-tag of the Claude Code CLI to follow: latest | stable
+  CLAUDE_CHANNEL: latest
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  bump:
+    name: bump (${{ matrix.name }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Claude Code CLI
+            arg: CLAUDE_VERSION
+            branch: deps/claude-code-cli
+            source: npm @anthropic-ai/claude-code
+            changelog: https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md
+          - name: uv
+            arg: UV_VERSION
+            branch: deps/uv
+            source: PyPI uv
+            changelog: https://github.com/astral-sh/uv/blob/main/CHANGELOG.md
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compare versions
+        id: v
+        env:
+          ARG: ${{ matrix.arg }}
+          NAME: ${{ matrix.name }}
+        run: |
+          set -euo pipefail
+          current="$(sed -n "s/^ARG ${ARG}=//p" Dockerfile)"
+          case "$ARG" in
+            CLAUDE_VERSION) latest="$(npm view "@anthropic-ai/claude-code@${CLAUDE_CHANNEL}" version)" ;;
+            UV_VERSION) latest="$(curl -fsSL https://pypi.org/pypi/uv/json | jq -r .info.version)" ;;
+          esac
+          echo "current=$current latest=$latest"
+          [[ -n "$current" && -n "$latest" ]]
+          newest="$(printf '%s\n%s\n' "$current" "$latest" | sort -V | tail -1)"
+          if [[ "$latest" == "$current" || "$newest" != "$latest" ]]; then
+            echo "update=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # The part of the version that signals incompatible changes:
+          # the major version, or major.minor while the major version is 0.
+          breaking() { if [[ "${1%%.*}" == 0 ]]; then cut -d. -f1-2 <<<"$1"; else echo "${1%%.*}"; fi; }
+          if [[ "$(breaking "$current")" != "$(breaking "$latest")" ]]; then
+            type='feat(deps)!'
+          else
+            type='fix(deps)'
+          fi
+          sed -i "s/^ARG ${ARG}=.*/ARG ${ARG}=${latest}/" Dockerfile
+          {
+            echo "update=true"
+            echo "current=$current"
+            echo "latest=$latest"
+            echo "title=${type}: bump ${NAME} from ${current} to ${latest}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Open pull request
+        if: steps.v.outputs.update == 'true'
+        uses: peter-evans/create-pull-request@v7
+        with:
+          token: ${{ secrets.BOT_TOKEN || github.token }}
+          branch: ${{ matrix.branch }}
+          delete-branch: true
+          commit-message: ${{ steps.v.outputs.title }}
+          title: ${{ steps.v.outputs.title }}
+          labels: dependencies
+          body: |
+            Bumps ${{ matrix.name }} in the image from `${{ steps.v.outputs.current }}` to `${{ steps.v.outputs.latest }}` (${{ matrix.source }}).
+
+            Changelog: ${{ matrix.changelog }}
+
+            Merging releases a new image version. The commit message decides the bump: `fix(deps):` → patch.
+            If this version changes behaviour users rely on, reword the commit to `feat(deps):` (minor) or `feat(deps)!:` (major) before merging.

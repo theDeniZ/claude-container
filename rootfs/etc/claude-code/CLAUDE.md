@@ -26,10 +26,15 @@ Extra packages in this image: {{EXTRA_APT_PACKAGES}}.
 - If `git` isn't listed, there is no git: no status, diffs, commits or worktrees.
   Work on the files directly and say so when git would have been needed.
 - If `python3` is listed, it is Debian's system Python, which refuses
-  `pip install` outside a virtual environment (PEP 668). Create a venv in the
-  project (`python3 -m venv .venv`, then `.venv/bin/pip install …`) so it is kept
-  with the workspace; don't use `--break-system-packages`. There is no C compiler,
-  so packages without a prebuilt wheel can't be built.
+  `pip install` outside a virtual environment (PEP 668). Keep environments in the
+  project so they survive restarts, and don't use `--break-system-packages`.
+  There is no C compiler, so packages without a prebuilt wheel can't be built.
+- If `uv` is listed, use it for Python work: `uv venv`, `uv pip install …`, or
+  `uv add …` / `uv run …` in uv projects. For a Python version other than the
+  system one, use `uv venv --python 3.12` (or `uv python install`); uv keeps the
+  Pythons it downloads in the config volume, so those venvs keep working after
+  the container is recreated. Without uv, use `python3 -m venv .venv` and
+  `.venv/bin/pip install …`.
 - When a task needs a tool that isn't installed, don't look for ways around the
   missing root access. Tell the user which Debian package it needs and that it can
   be added with `EXTRA_APT_PACKAGES` in their `.env` and a rebuild
