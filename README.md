@@ -18,7 +18,7 @@ and a [Python](#image-variants) variant. See [Versions and releases](#versions-a
 ```bash
 git clone https://github.com/theDeniZ/claude-container.git && cd claude-container
 cp .env.example .env
-# edit .env: set WORKSPACE_PATH to your project, PUID/PGID to `id -u` / `id -g`
+# edit .env: set WORKSPACE_PATH to your project
 docker compose up -d
 ```
 
@@ -124,7 +124,7 @@ Every setting is an environment variable. See [`.env.example`](.env.example) for
 |---|---|---|
 | `WORKSPACE_PATH` | `./workspace` | Host folder mounted at `/workspace` |
 | `CLAUDE_CONFIG_PATH` | `claude-config` | Docker volume name **or** host path for login/settings (`/home/claude/.claude`) |
-| `PUID` / `PGID` | `1000` | UID/GID Claude runs as. Match your host user so workspace files stay yours |
+| `PUID` / `PGID` | owner of `/workspace` | UID/GID Claude runs as, so workspace files stay yours. Unset, they follow the owner of the workspace folder (`1000` if root owns it) |
 | `CLAUDE_REMOTE_CONTROL` | `false` | Start the Remote Control server on container start |
 | `CLAUDE_RC_NAME` | `claude-container` | Remote Control name (also the container hostname); unique per stack |
 | `CLAUDE_RC_MODE` | `session` | `session`: one named session at start; `server`: sessions on demand from the apps |

@@ -167,6 +167,15 @@ jobs:
           docker exec smoke claude-status --json | jq -e '.remoteControl.enabled == false and .remoteControl.sessions == []'
           docker rm -f smoke
 
+          # Without PUID/PGID, Claude runs as the owner of /workspace
+          mkdir -p ws-auto && sudo chown 1024:100 ws-auto
+          docker run -d --name smoke-auto -v "$PWD/ws-auto:/workspace" claude-container:test
+          sleep 5
+          [[ "$(docker exec -u claude smoke-auto id -u):$(docker exec -u claude smoke-auto id -g)" == "1024:100" ]]
+          docker exec -u claude smoke-auto mkdir /workspace/.claude
+          [[ "$(stat -c %u:%g ws-auto/.claude)" == "1024:100" ]]
+          docker rm -f smoke-auto
+
           # ...and unhealthy with Remote Control on but no login.
           docker run -d --name smoke-rc -e CLAUDE_REMOTE_CONTROL=true claude-container:test
           sleep 5
