@@ -5,6 +5,11 @@ name: Docker image
 # after semantic-release creates the tag (tags pushed with GITHUB_TOKEN don't
 # trigger workflows), or by pushing a v* tag by hand.
 # A published version is never rebuilt or overwritten.
+#
+# Every version is published as several variants built from the same Dockerfile,
+# differing only in EXTRA_APT_PACKAGES:
+#   slim    X.Y.Z,        X.Y,        X,        latest
+#   python  X.Y.Z-python, X.Y-python, X-python, python
 
 on:
   pull_request:
@@ -22,7 +27,20 @@ env:
 
 jobs:
   build:
+    name: build (${{ matrix.variant }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - variant: slim
+            suffix: ""
+            latest: latest
+            packages: ""
+          - variant: python
+            suffix: -python
+            latest: python
+            packages: python3 python3-venv python3-pip python-is-python3 curl git openssh-client
     permissions:
       contents: read
       packages: write
@@ -64,8 +82,9 @@ jobs:
       - name: Refuse to overwrite a published version
         if: steps.version.outputs.publish == 'true'
         run: |
-          if docker buildx imagetools inspect "$IMAGE:${{ steps.version.outputs.version }}" >/dev/null 2>&1; then
-            echo "::error::$IMAGE:${{ steps.version.outputs.version }} already exists; published images are immutable."
+          tag="$IMAGE:${{ steps.version.outputs.version }}${{ matrix.suffix }}"
+          if docker buildx imagetools inspect "$tag" >/dev/null 2>&1; then
+            echo "::error::$tag already exists; published images are immutable."
             exit 1
           fi
 
@@ -78,11 +97,16 @@ jobs:
           context: .
           load: true
           tags: claude-container:test
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          build-args: |
+            EXTRA_APT_PACKAGES=${{ matrix.packages }}
+          cache-from: type=gha,scope=${{ matrix.variant }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.variant }}
 
       - name: Smoke test
         id: smoke
+        env:
+          VARIANT: ${{ matrix.variant }}
+          PACKAGES: ${{ matrix.packages }}
         run: |
           set -euxo pipefail
           cli="$(docker run --rm --entrypoint /home/claude/.local/bin/claude claude-container:test --version | awk '{print $1}')"
@@ -106,7 +130,21 @@ jobs:
           # Health check: healthy with Remote Control off...
           docker exec smoke healthcheck
           # Managed CLAUDE.md is in place with its placeholder filled in
-          docker exec smoke grep -q "Extra packages in this image: none." /etc/claude-code/CLAUDE.md
+          if [[ -z "$PACKAGES" ]]; then
+            docker exec smoke grep -q "Extra packages in this image: none." /etc/claude-code/CLAUDE.md
+          else
+            for p in $PACKAGES; do docker exec smoke grep -q "\`$p\`" /etc/claude-code/CLAUDE.md; done
+          fi
+          # Python variant: python/pip/venv work for the claude user, plus git and curl
+          if [[ "$VARIANT" == python ]]; then
+            docker exec -u claude -w /tmp smoke bash -euxc '
+              python --version
+              python3 -m venv /tmp/venv
+              /tmp/venv/bin/pip --version
+              git --version
+              curl --version
+              ssh -V'
+          fi
           # Status command: readable and JSON output
           docker exec smoke claude-status
           docker exec smoke claude-status --json | jq -e '.remoteControl.enabled == false and .remoteControl.sessions == []'
@@ -125,15 +163,18 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.IMAGE }}
-          flavor: latest=false
+          flavor: |
+            latest=false
+            suffix=${{ matrix.suffix }},onlatest=false
           tags: |
             type=semver,pattern={{version}},value=${{ steps.version.outputs.version }}
             type=semver,pattern={{major}}.{{minor}},value=${{ steps.version.outputs.version }}
             type=semver,pattern={{major}},value=${{ steps.version.outputs.version }}
-            type=raw,value=latest
+            type=raw,value=${{ matrix.latest }},suffix=
           labels: |
             org.opencontainers.image.version=${{ steps.version.outputs.version }}
             dev.claude-code.version=${{ steps.smoke.outputs.claude_version }}
+            dev.claude-container.variant=${{ matrix.variant }}
 
       - name: Build and push (multi-arch)
         if: steps.version.outputs.publish == 'true'
@@ -144,5 +185,7 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          build-args: |
+            EXTRA_APT_PACKAGES=${{ matrix.packages }}
+          cache-from: type=gha,scope=${{ matrix.variant }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.variant }}
