@@ -1,13 +1,23 @@
 #!/usr/bin/env bash
-# Container entrypoint (runs as root): maps the claude user to PUID/PGID, fixes
-# ownership of the persistent config dir, then drops privileges to run either
-# the given command or the supervisor (Remote Control / idle).
+# Container entrypoint (runs as root): maps the claude user to PUID/PGID (by
+# default the owner of /workspace), fixes ownership of the persistent config
+# dir, then drops privileges to run either the given command or the supervisor
+# (Remote Control / idle).
 set -euo pipefail
 
 log() { echo "[entrypoint] $*"; }
 
-PUID="${PUID:-1000}"
-PGID="${PGID:-1000}"
+# Without PUID/PGID, run as whoever owns the mounted project folder, so files
+# Claude creates there (e.g. /workspace/.claude) belong to the host user. A
+# root-owned or missing /workspace falls back to 1000.
+WS_UID="" WS_GID=""
+if [[ -d /workspace ]]; then
+  read -r WS_UID WS_GID < <(stat -c '%u %g' /workspace)
+fi
+[[ "$WS_UID" == "0" ]] && WS_UID=""
+[[ "$WS_GID" == "0" ]] && WS_GID=""
+PUID="${PUID:-${WS_UID:-1000}}"
+PGID="${PGID:-${WS_GID:-1000}}"
 CONFIG_DIR="${CLAUDE_CONFIG_DIR:-/home/claude/.claude}"
 
 if [[ "$(id -u)" != "0" ]]; then
@@ -46,8 +56,11 @@ mkdir -p "$RUNTIME_DIR"
 chown "$PUID:$PGID" "$RUNTIME_DIR"
 chmod 0700 "$RUNTIME_DIR"
 
-# Workspace belongs to the host user; only warn if we can't write to it.
-if [[ -d /workspace ]] && ! gosu claude test -w /workspace; then
+# Workspace belongs to the host user and is never chowned; warn on a mismatch,
+# since Claude would create files there (/workspace/.claude, ...) as another user.
+if [[ -n "$WS_UID" && "$WS_UID" != "$PUID" ]]; then
+  log "WARNING: /workspace is owned by UID $WS_UID but Claude runs as UID $PUID; files it creates there will belong to $PUID. Set PUID=$WS_UID PGID=${WS_GID:-$WS_UID}, or leave both unset to match automatically."
+elif [[ -d /workspace ]] && ! gosu claude test -w /workspace; then
   log "WARNING: /workspace is not writable by UID $PUID. Set PUID/PGID to the owner of your project folder."
 fi
 

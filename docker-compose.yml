@@ -1,5 +1,5 @@
 # Claude Code in a container.
-#   cp .env.example .env   # adjust WORKSPACE_PATH, PUID/PGID, ...
+#   cp .env.example .env   # adjust WORKSPACE_PATH, ...
 #   docker compose up -d
 #   docker compose exec -u claude claude claude
 # To build the image locally instead of pulling it, add -f docker-compose.build.yml.
@@ -16,8 +16,9 @@ services:
     stdin_open: true
     tty: true
     environment:
-      PUID: ${PUID:-1000}
-      PGID: ${PGID:-1000}
+      # Empty: use the owner of WORKSPACE_PATH.
+      PUID: ${PUID:-}
+      PGID: ${PGID:-}
       TZ: ${TZ:-UTC}
       CLAUDE_REMOTE_CONTROL: ${CLAUDE_REMOTE_CONTROL:-false}
       CLAUDE_RC_NAME: ${CLAUDE_RC_NAME:-claude-container}
