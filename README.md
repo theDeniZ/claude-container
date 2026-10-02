@@ -93,7 +93,7 @@ updated together:
 | Variant | Tags | Extra packages |
 |---|---|---|
 | slim | `latest`, `X.Y.Z`, `X.Y`, `X` | none |
-| python | `python`, `X.Y.Z-python`, `X.Y-python`, `X-python` | `python3`, `python3-venv`, `python3-pip`, `python-is-python3`, `curl`, `git`, `openssh-client` |
+| python | `python`, `X.Y.Z-python`, `X.Y-python`, `X-python` | `python3`, `python3-venv`, `python3-pip`, `python-is-python3`, `curl`, `git`, `openssh-client`, [uv](https://docs.astral.sh/uv/) |
 
 Pick one in `.env`:
 
@@ -102,11 +102,19 @@ CLAUDE_IMAGE=ghcr.io/thedeniz/claude-container:python
 ```
 
 The Python variant has Debian's Python (`python` and `python3`), `pip` and `venv`,
-plus `git` (with `openssh-client` for SSH remotes) and `curl`. Debian's Python is
-externally managed, so install packages into a virtual environment in your project
-(`python3 -m venv .venv`); the managed `CLAUDE.md` tells Claude to do the same.
+[uv](https://docs.astral.sh/uv/), `git` (with `openssh-client` for SSH remotes) and
+`curl`. Debian's Python is externally managed, so packages go into a virtual
+environment in your project, which also keeps them across restarts:
+
+- `uv venv` and `uv pip install …`, or `uv add …` in a uv project (fast, and the
+  managed `CLAUDE.md` tells Claude to prefer it), or `python3 -m venv .venv`.
+- Need another Python version? `uv venv --python 3.12` downloads it. uv keeps the
+  Pythons it downloads in the config volume (`UV_PYTHON_INSTALL_DIR`), so venvs that
+  use them still work after the container is recreated.
+
 There is no compiler: packages without a prebuilt wheel need a
-[local build](#optional-tools) with `build-essential python3-dev` added.
+[local build](#optional-tools) with `build-essential python3-dev` added. A local build
+can also add uv with `WITH_UV=true`.
 
 ## Configuration
 
@@ -261,10 +269,12 @@ The image has one version, `X.Y.Z`, set by
 
 Dependencies are pinned and bumped through pull requests:
 
-- **Claude Code CLI:** `ARG CLAUDE_VERSION` in the `Dockerfile`.
-  [`update-claude-cli.yml`](.github/workflows/update-claude-cli.yml) checks npm every
-  night and opens or updates a `fix(deps):` PR (`feat(deps)!:` for a new CLI major).
-  Reword its commit to `feat`/`feat!` if the new CLI changes behaviour users rely on.
+- **Claude Code CLI** (`ARG CLAUDE_VERSION`) and **uv** (`ARG UV_VERSION`) in the
+  `Dockerfile`: [`update-deps.yml`](.github/workflows/update-deps.yml) checks npm and
+  PyPI every night and opens or updates one `fix(deps):` PR per tool
+  (`feat(deps)!:` for a new major version, or a new minor version of a 0.x tool).
+  Reword its commit to `feat`/`feat!` if the new version changes behaviour users
+  rely on.
 - **Base image** (pinned by digest) and **GitHub Actions**: Dependabot, as `fix(deps):`
   and `chore(deps):` respectively.
 

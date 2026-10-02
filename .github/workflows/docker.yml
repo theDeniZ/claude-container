@@ -37,10 +37,12 @@ jobs:
             suffix: ""
             latest: latest
             packages: ""
+            uv: "false"
           - variant: python
             suffix: -python
             latest: python
             packages: python3 python3-venv python3-pip python-is-python3 curl git openssh-client
+            uv: "true"
     permissions:
       contents: read
       packages: write
@@ -99,6 +101,7 @@ jobs:
           tags: claude-container:test
           build-args: |
             EXTRA_APT_PACKAGES=${{ matrix.packages }}
+            WITH_UV=${{ matrix.uv }}
           cache-from: type=gha,scope=${{ matrix.variant }}
           cache-to: type=gha,mode=max,scope=${{ matrix.variant }}
 
@@ -107,6 +110,7 @@ jobs:
         env:
           VARIANT: ${{ matrix.variant }}
           PACKAGES: ${{ matrix.packages }}
+          WITH_UV: ${{ matrix.uv }}
         run: |
           set -euxo pipefail
           cli="$(docker run --rm --entrypoint /home/claude/.local/bin/claude claude-container:test --version | awk '{print $1}')"
@@ -134,6 +138,19 @@ jobs:
             docker exec smoke grep -q "Extra packages in this image: none." /etc/claude-code/CLAUDE.md
           else
             for p in $PACKAGES; do docker exec smoke grep -q "\`$p\`" /etc/claude-code/CLAUDE.md; done
+          fi
+          # uv only where asked for, listed in the managed CLAUDE.md, with its
+          # Pythons kept in the config volume
+          if [[ "$WITH_UV" == true ]]; then
+            docker exec smoke grep -q '`uv`' /etc/claude-code/CLAUDE.md
+            docker exec -u claude -w /tmp smoke bash -euxc '
+              uv --version
+              uvx --version
+              [[ "$(uv python dir)" == /home/claude/.claude/uv/python ]]
+              uv venv /tmp/uvenv
+              uv pip install --python /tmp/uvenv/bin/python --dry-run six'
+          elif docker exec smoke sh -c 'command -v uv'; then
+            echo "uv must not be in the $VARIANT image"; exit 1
           fi
           # Python variant: python/pip/venv work for the claude user, plus git and curl
           if [[ "$VARIANT" == python ]]; then
@@ -187,5 +204,6 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
             EXTRA_APT_PACKAGES=${{ matrix.packages }}
+            WITH_UV=${{ matrix.uv }}
           cache-from: type=gha,scope=${{ matrix.variant }}
           cache-to: type=gha,mode=max,scope=${{ matrix.variant }}

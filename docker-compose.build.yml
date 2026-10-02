@@ -9,3 +9,4 @@ services:
       context: .
       args:
         EXTRA_APT_PACKAGES: ${EXTRA_APT_PACKAGES:-}
+        WITH_UV: ${WITH_UV:-false}
