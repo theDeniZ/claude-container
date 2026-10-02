@@ -10,7 +10,8 @@ Run [Claude Code](https://docs.claude.com/en/docs/claude-code) in a container wi
 - a built-in health check
 - files written with your own UID/GID, not root
 
-Image: `ghcr.io/thedeniz/claude-container` (linux/amd64, linux/arm64). See [Versions and releases](#versions-and-releases).
+Image: `ghcr.io/thedeniz/claude-container` (linux/amd64, linux/arm64), in a slim
+and a [Python](#image-variants) variant. See [Versions and releases](#versions-and-releases).
 
 ## Quick start
 
@@ -83,6 +84,29 @@ Several stacks can share one config folder (one login) as long as each has its o
 - `CLAUDE_PERMISSION_MODE=bypassPermissions` lets Claude act without asking. The
   container is the sandbox, but Claude can still do anything your mounted workspace,
   tokens and network allow.
+
+## Image variants
+
+Every release is published in these variants, built from the same commit and
+updated together:
+
+| Variant | Tags | Extra packages |
+|---|---|---|
+| slim | `latest`, `X.Y.Z`, `X.Y`, `X` | none |
+| python | `python`, `X.Y.Z-python`, `X.Y-python`, `X-python` | `python3`, `python3-venv`, `python3-pip`, `python-is-python3`, `curl`, `git`, `openssh-client` |
+
+Pick one in `.env`:
+
+```dotenv
+CLAUDE_IMAGE=ghcr.io/thedeniz/claude-container:python
+```
+
+The Python variant has Debian's Python (`python` and `python3`), `pip` and `venv`,
+plus `git` (with `openssh-client` for SSH remotes) and `curl`. Debian's Python is
+externally managed, so install packages into a virtual environment in your project
+(`python3 -m venv .venv`); the managed `CLAUDE.md` tells Claude to do the same.
+There is no compiler: packages without a prebuilt wheel need a
+[local build](#optional-tools) with `build-essential python3-dev` added.
 
 ## Configuration
 
@@ -205,17 +229,17 @@ Other common additions: `openssh-client` (git over SSH), `gh` (GitHub CLI),
 
 ### Possible expansions
 
-Not built yet: ideas for making tools easier to get without giving up updatable
-images.
+Ideas for making tools easier to get without giving up updatable images.
 
 - **Choose a feature set up front (preferred).** Decide which tools you need when you
   set the container up, commit to that choice, and switch deliberately later. The
   options below should support that, not replace it.
-- **Several published images.** Release a few variants from the same repo and
-  version, e.g. `X.Y.Z` (slim), `X.Y.Z-git` (git, openssh-client, gh) and
-  `X.Y.Z-full` (plus python3, nodejs, …). Changing the feature set then means changing
-  the image tag, with no local build, and every variant keeps getting updates.
-- **Remember and reinstall (last resort).** Record the packages installed at runtime
+- **Several published images.** Started with the [`python`](#image-variants)
+  variant. More can be added the same way (a matrix entry in
+  [`docker.yml`](.github/workflows/docker.yml)), e.g. `-git` (git, openssh-client,
+  gh) or `-node` (nodejs, npm). Changing the feature set then means changing the
+  image tag, with no local build, and every variant keeps getting updates.
+- **Remember and reinstall (last resort, not built).** Record the packages installed at runtime
   in the config volume and reinstall them on every start, before Remote Control
   starts. This makes tools survive image updates, but at a cost: every start gets
   slower and needs network access, root is needed at runtime, and the tool set can
@@ -255,8 +279,11 @@ Flow: bump PR → CI builds and smoke-tests → rebase-merge → semantic-releas
 | `X.Y`, `X` | to the newest matching release |
 | `latest` | to the newest release |
 
+The [Python variant](#image-variants) has the same tags with a `-python` suffix,
+and `python` instead of `latest`.
+
 The Claude Code version inside is in the image label `dev.claude-code.version` and in the
-GitHub release notes.
+GitHub release notes; the variant is in `dev.claude-container.variant`.
 
 ### Repository setup
 
