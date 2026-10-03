@@ -12,7 +12,7 @@ FROM debian:trixie-slim@sha256:a99cfc517144bc59b1978475ec53b46ecabec7e43635402ee
 
 # Claude Code version baked into the image. Pinned so every release is
 # reproducible; .github/workflows/update-deps.yml opens a PR to bump it.
-ARG CLAUDE_VERSION=2.1.286
+ARG CLAUDE_VERSION=2.1.288
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ca-certificates curl \
