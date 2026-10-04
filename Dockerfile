@@ -4,7 +4,7 @@
 
 # uv (Python package and version manager), installed only with WITH_UV=true
 # (the python variant). Pinned; .github/workflows/update-deps.yml bumps it.
-ARG UV_VERSION=0.12.22
+ARG UV_VERSION=0.12.23
 ARG WITH_UV=false
 
 # --- Install Claude Code (curl and the installer stay out of the final image) ---
