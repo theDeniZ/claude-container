@@ -10,8 +10,9 @@ Run [Claude Code](https://docs.claude.com/en/docs/claude-code) in a container wi
 - a built-in health check
 - files written with your own UID/GID, not root
 
-Image: `ghcr.io/thedeniz/claude-container` (linux/amd64, linux/arm64), in a slim
-and a [Python](#image-variants) variant. See [Versions and releases](#versions-and-releases).
+Image: `ghcr.io/thedeniz/claude-container` (linux/amd64, linux/arm64), in a slim,
+a [Python](#image-variants) and a [full](#full-variant) (Python, C, Rust, Node.js)
+variant. See [Versions and releases](#versions-and-releases).
 
 ## Quick start
 
@@ -94,6 +95,7 @@ updated together:
 |---|---|---|
 | slim | `latest`, `X.Y.Z`, `X.Y`, `X` | none |
 | python | `python`, `X.Y.Z-python`, `X.Y-python`, `X-python` | `python3`, `python3-venv`, `python3-pip`, `python-is-python3`, `curl`, `git`, `openssh-client`, [uv](https://docs.astral.sh/uv/) |
+| full | `full`, `X.Y.Z-full`, `X.Y-full`, `X-full` | everything in python, plus `build-essential`, `pkg-config`, [rustup](https://rustup.rs/) (Rust stable with clippy and rustfmt), [Node.js](https://nodejs.org/) LTS with npm, [ONNX Runtime](https://onnxruntime.ai/) shared library |
 
 Pick one in `.env`:
 
@@ -112,9 +114,43 @@ environment in your project, which also keeps them across restarts:
   Pythons it downloads in the config volume (`UV_PYTHON_INSTALL_DIR`), so venvs that
   use them still work after the container is recreated.
 
-There is no compiler: packages without a prebuilt wheel need a
-[local build](#optional-tools) with `build-essential python3-dev` added. A local build
-can also add uv with `WITH_UV=true`.
+There is no compiler: packages without a prebuilt wheel need the
+[full variant](#full-variant) or a [local build](#optional-tools) with
+`build-essential python3-dev` added. A local build can also add uv with `WITH_UV=true`.
+
+### Full variant
+
+For projects that build native code: everything in the Python variant, plus
+
+- **C toolchain:** `build-essential` (gcc, g++, make, the linker) and `pkg-config`, so
+  Rust crates that compile C through the `cc` crate and Python packages without
+  wheels build.
+- **Rust:** [rustup](https://rustup.rs/) with `cargo`, `rustc`, `clippy` and `rustfmt`.
+  `RUSTUP_HOME` and `CARGO_HOME` point into the config volume
+  (`~/.claude/rustup`, `~/.claude/cargo`), so the toolchain, the crate cache and
+  `cargo install`ed tools survive rebuilds and image updates. The toolchain
+  (`RUST_TOOLCHAIN`, default `stable`) is installed on the **first start**, which takes
+  a minute and needs network access; later starts reuse it. Update it with
+  `docker compose exec -u claude claude rustup update`. rustup itself comes with the image.
+- **Node.js:** the current LTS release with `npm` and `npx`. `npm install -g` goes to
+  the config volume (`NPM_CONFIG_PREFIX=~/.claude/npm-global`) and stays installed.
+- **ONNX Runtime:** the CPU build of `libonnxruntime.so` (1.30.0) in `/usr/local/lib`,
+  with `ORT_DYLIB_PATH` pointing at it, for programs that load it at runtime (such as
+  the Rust [`ort`](https://ort.pyke.io/) crate with `load-dynamic`). It's only loaded at
+  runtime, so builds and tests that don't touch it don't need it.
+
+Large data your project needs at runtime, such as model files, is better mounted from
+the host than downloaded into the container. Add a `docker-compose.override.yml`
+next to `docker-compose.yml`:
+
+```yaml
+services:
+  claude:
+    environment:
+      SOPACK_CACHE: /models
+    volumes:
+      - /path/on/host/model-cache:/models
+```
 
 ## Configuration
 
@@ -138,6 +174,7 @@ Every setting is an environment variable. See [`.env.example`](.env.example) for
 | `CLAUDE_CODE_OAUTH_TOKEN` | | Optional long-lived token (`claude setup-token`) for normal sessions |
 | `GH_TOKEN` | | Token for `gh`, if you add it (see [Optional tools](#optional-tools)) |
 | `TZ` | `UTC` | Time zone (other than UTC needs `tzdata` added) |
+| `RUST_TOOLCHAIN` | `stable` | Full variant: Rust toolchain installed into the config volume on first start |
 
 ### Persistent config
 
@@ -235,6 +272,15 @@ Without `git`, Claude still reads, edits and runs code, but has no git context
 Other common additions: `openssh-client` (git over SSH), `gh` (GitHub CLI),
 `python3`, `nodejs npm` (many MCP servers), `tzdata`, `less`.
 
+Tools that don't come from Debian are build args, each `false` by default:
+
+| Build arg | Adds |
+|---|---|
+| `WITH_UV=true` | uv |
+| `WITH_RUST=true` | rustup, toolchain installed into the config volume on first start (add `build-essential` for the linker) |
+| `WITH_NODE=true` | Node.js LTS with npm (newer than Debian's `nodejs`) |
+| `WITH_ONNXRUNTIME=true` | `libonnxruntime.so`, with `ORT_DYLIB_PATH` set |
+
 ### Possible expansions
 
 Ideas for making tools easier to get without giving up updatable images.
@@ -242,10 +288,10 @@ Ideas for making tools easier to get without giving up updatable images.
 - **Choose a feature set up front (preferred).** Decide which tools you need when you
   set the container up, commit to that choice, and switch deliberately later. The
   options below should support that, not replace it.
-- **Several published images.** Started with the [`python`](#image-variants)
-  variant. More can be added the same way (a matrix entry in
+- **Several published images.** Started with the [`python`](#image-variants) and
+  [`full`](#full-variant) variants. More can be added the same way (a matrix entry in
   [`docker.yml`](.github/workflows/docker.yml)), e.g. `-git` (git, openssh-client,
-  gh) or `-node` (nodejs, npm). Changing the feature set then means changing the
+  gh). Changing the feature set then means changing the
   image tag, with no local build, and every variant keeps getting updates.
 - **Remember and reinstall (last resort, not built).** Record the packages installed at runtime
   in the config volume and reinstall them on every start, before Remote Control
@@ -269,12 +315,17 @@ The image has one version, `X.Y.Z`, set by
 
 Dependencies are pinned and bumped through pull requests:
 
-- **Claude Code CLI** (`ARG CLAUDE_VERSION`) and **uv** (`ARG UV_VERSION`) in the
-  `Dockerfile`: [`update-deps.yml`](.github/workflows/update-deps.yml) checks npm and
-  PyPI every night and opens or updates one `fix(deps):` PR per tool
+- **Claude Code CLI** (`ARG CLAUDE_VERSION`), **uv** (`ARG UV_VERSION`), **rustup**
+  (`ARG RUSTUP_VERSION`) and **Node.js** (`ARG NODE_VERSION`, LTS releases only) in the
+  `Dockerfile`: [`update-deps.yml`](.github/workflows/update-deps.yml) checks for new
+  releases every night and opens or updates one `fix(deps):` PR per tool
   (`feat(deps)!:` for a new major version, or a new minor version of a 0.x tool).
   Reword its commit to `feat`/`feat!` if the new version changes behaviour users
   rely on.
+- **ONNX Runtime** (`ARG ONNXRUNTIME_VERSION` and its SHA-256s) is bumped by hand: the
+  version has to match what the `ort` crate of the projects using it expects.
+- **Rust toolchain:** not pinned in the image; installed on first start and updated
+  with `rustup update`.
 - **Base image** (pinned by digest) and **GitHub Actions**: Dependabot, as `fix(deps):`
   and `chore(deps):` respectively.
 
@@ -289,8 +340,8 @@ Flow: bump PR → CI builds and smoke-tests → rebase-merge → semantic-releas
 | `X.Y`, `X` | to the newest matching release |
 | `latest` | to the newest release |
 
-The [Python variant](#image-variants) has the same tags with a `-python` suffix,
-and `python` instead of `latest`.
+The [Python](#image-variants) and [full](#full-variant) variants have the same tags
+with a `-python` or `-full` suffix, and `python` or `full` instead of `latest`.
 
 The Claude Code version inside is in the image label `dev.claude-code.version` and in the
 GitHub release notes; the variant is in `dev.claude-container.variant`.
@@ -314,3 +365,6 @@ GitHub release notes; the variant is in `dev.claude-container.variant`.
 `procps`, `gosu` and `tini`, and the Claude Code CLI (about 240 MB, most of the image),
 installed with the official native installer in a separate build stage so the installer
 and `curl` stay out of the image. Claude Code ships its own ripgrep.
+
+Tools that don't come from Debian (uv, rustup, Node.js, ONNX Runtime) are downloaded
+in another build stage, checked against their SHA-256, and copied to `/usr/local`.
