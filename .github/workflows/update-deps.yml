@@ -1,6 +1,7 @@
 name: Update pinned dependencies
 
-# Nightly: for each version pinned with an ARG in the Dockerfile, open (or
+# Nightly: for each version pinned with an ARG in the Dockerfile (except
+# ONNX Runtime, which must match the projects that load it), open (or
 # update) a PR when a newer release is out. A compatible bump is
 # "fix(deps):" (patch release); a new major version (or, for 0.x, a new minor
 # version) is "feat(deps)!:" (major release) for review.
@@ -41,6 +42,16 @@ jobs:
             branch: deps/uv
             source: PyPI uv
             changelog: https://github.com/astral-sh/uv/blob/main/CHANGELOG.md
+          - name: rustup
+            arg: RUSTUP_VERSION
+            branch: deps/rustup
+            source: static.rust-lang.org rustup release-stable.toml
+            changelog: https://github.com/rust-lang/rustup/blob/main/CHANGELOG.md
+          - name: Node.js
+            arg: NODE_VERSION
+            branch: deps/nodejs
+            source: newest LTS on nodejs.org/dist/index.json
+            changelog: https://github.com/nodejs/node/tree/main/doc/changelogs
     steps:
       - uses: actions/checkout@v7
 
@@ -55,6 +66,9 @@ jobs:
           case "$ARG" in
             CLAUDE_VERSION) latest="$(npm view "@anthropic-ai/claude-code@${CLAUDE_CHANNEL}" version)" ;;
             UV_VERSION) latest="$(curl -fsSL https://pypi.org/pypi/uv/json | jq -r .info.version)" ;;
+            RUSTUP_VERSION) latest="$(curl -fsSL https://static.rust-lang.org/rustup/release-stable.toml | sed -n "s/^version = '\(.*\)'$/\1/p")" ;;
+            # LTS releases only; a new LTS major comes as a feat(deps)! PR.
+            NODE_VERSION) latest="$(curl -fsSL https://nodejs.org/dist/index.json | jq -r '[.[] | select(.lts)][0].version | ltrimstr("v")')" ;;
           esac
           echo "current=$current latest=$latest"
           [[ -n "$current" && -n "$latest" ]]

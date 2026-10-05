@@ -28,6 +28,8 @@ services:
       CLAUDE_PERMISSION_MODE: ${CLAUDE_PERMISSION_MODE:-default}
       CLAUDE_AUTO_UPDATE: ${CLAUDE_AUTO_UPDATE:-false}
       CLAUDE_TRUST_WORKSPACE: ${CLAUDE_TRUST_WORKSPACE:-true}
+      # Images with rustup (full variant): toolchain installed on first start.
+      RUST_TOOLCHAIN: ${RUST_TOOLCHAIN:-stable}
       # Optional non-interactive auth (not usable for Remote Control).
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}

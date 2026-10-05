@@ -55,6 +55,24 @@ if [[ "${CLAUDE_PERMISSION_MODE:-default}" == "bypassPermissions" ]]; then
     || log "WARNING: could not update $SETTINGS_FILE"
 fi
 
+# --- Rust toolchain ---------------------------------------------------------
+# Images with rustup keep the toolchain in the config volume (RUSTUP_HOME), so
+# it is installed on the first start and reused after that.
+if command -v rustup >/dev/null 2>&1; then
+  toolchain="${RUST_TOOLCHAIN:-stable}"
+  # rustup lives in the read-only image; the image update replaces it.
+  rustup set auto-self-update disable >/dev/null 2>&1 || true
+  if ! RUSTUP_AUTO_INSTALL=0 rustup run "$toolchain" rustc --version >/dev/null 2>&1; then
+    log "Installing Rust toolchain '$toolchain' into $RUSTUP_HOME (first start only)..."
+    rustup toolchain install "$toolchain" --profile minimal --component clippy,rustfmt \
+      || log "WARNING: could not install Rust toolchain '$toolchain'; run 'rustup toolchain install $toolchain' later"
+  fi
+  if ! rustup default >/dev/null 2>&1; then
+    rustup default "$toolchain" >/dev/null 2>&1 || true
+  fi
+  log "$(RUSTUP_AUTO_INSTALL=0 rustc --version 2>/dev/null || echo 'Rust: no toolchain installed')"
+fi
+
 # --- Explicit command -------------------------------------------------------
 if [[ $# -gt 0 ]]; then
   cd "$WORKSPACE" 2>/dev/null || true

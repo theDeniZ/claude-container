@@ -10,3 +10,6 @@ services:
       args:
         EXTRA_APT_PACKAGES: ${EXTRA_APT_PACKAGES:-}
         WITH_UV: ${WITH_UV:-false}
+        WITH_RUST: ${WITH_RUST:-false}
+        WITH_NODE: ${WITH_NODE:-false}
+        WITH_ONNXRUNTIME: ${WITH_ONNXRUNTIME:-false}

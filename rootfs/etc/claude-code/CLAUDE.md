@@ -28,17 +28,29 @@ Extra packages in this image: {{EXTRA_APT_PACKAGES}}.
 - If `python3` is listed, it is Debian's system Python, which refuses
   `pip install` outside a virtual environment (PEP 668). Keep environments in the
   project so they survive restarts, and don't use `--break-system-packages`.
-  There is no C compiler, so packages without a prebuilt wheel can't be built.
+  Unless `build-essential` is listed, there is no C compiler, so packages
+  without a prebuilt wheel can't be built.
 - If `uv` is listed, use it for Python work: `uv venv`, `uv pip install …`, or
   `uv add …` / `uv run …` in uv projects. For a Python version other than the
   system one, use `uv venv --python 3.12` (or `uv python install`); uv keeps the
   Pythons it downloads in the config volume, so those venvs keep working after
   the container is recreated. Without uv, use `python3 -m venv .venv` and
   `.venv/bin/pip install …`.
+- If `rustup` is listed, Rust is managed by rustup: `cargo`, `rustc`, `clippy`
+  and `rustfmt` are on the PATH. The toolchain (`$RUSTUP_HOME`), the crate cache
+  and `cargo install`ed tools (`$CARGO_HOME`) live in the config volume and
+  survive restarts. `rustup toolchain install …` and `rustup update` work; don't
+  try to update rustup itself, it belongs to the image.
+- If `node` is listed, Node.js LTS with `npm` and `npx` is installed. `npm install -g`
+  goes to the config volume (`$NPM_CONFIG_PREFIX`), so global tools persist; for
+  project dependencies prefer a local `npm install`.
+- If `onnxruntime` is listed, the ONNX Runtime shared library is at
+  `$ORT_DYLIB_PATH` (`/usr/local/lib/libonnxruntime.so`) for programs that load
+  it at runtime, such as the Rust `ort` crate with `load-dynamic`.
 - When a task needs a tool that isn't installed, don't look for ways around the
   missing root access. Tell the user which Debian package it needs and that it can
   be added with `EXTRA_APT_PACKAGES` in their `.env` and a rebuild
   (`docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build`),
-  or, for Python, by switching to the `python` image variant.
+  or by switching to the `python` or `full` image variant.
 - `claude-status` shows the login, Remote Control and the sessions running in the
   container.

@@ -7,9 +7,11 @@ name: Docker image
 # A published version is never rebuilt or overwritten.
 #
 # Every version is published as several variants built from the same Dockerfile,
-# differing only in EXTRA_APT_PACKAGES:
+# differing only in EXTRA_APT_PACKAGES and the WITH_* build args:
 #   slim    X.Y.Z,        X.Y,        X,        latest
 #   python  X.Y.Z-python, X.Y-python, X-python, python
+#   full    X.Y.Z-full,   X.Y-full,   X-full,   full    (python + C toolchain,
+#                                                        Rust, Node.js, ONNX Runtime)
 
 on:
   pull_request:
@@ -38,11 +40,25 @@ jobs:
             latest: latest
             packages: ""
             uv: "false"
+            rust: "false"
+            node: "false"
+            onnxruntime: "false"
           - variant: python
             suffix: -python
             latest: python
             packages: python3 python3-venv python3-pip python-is-python3 curl git openssh-client
             uv: "true"
+            rust: "false"
+            node: "false"
+            onnxruntime: "false"
+          - variant: full
+            suffix: -full
+            latest: full
+            packages: python3 python3-venv python3-pip python-is-python3 curl git openssh-client build-essential pkg-config
+            uv: "true"
+            rust: "true"
+            node: "true"
+            onnxruntime: "true"
     permissions:
       contents: read
       packages: write
@@ -102,6 +118,9 @@ jobs:
           build-args: |
             EXTRA_APT_PACKAGES=${{ matrix.packages }}
             WITH_UV=${{ matrix.uv }}
+            WITH_RUST=${{ matrix.rust }}
+            WITH_NODE=${{ matrix.node }}
+            WITH_ONNXRUNTIME=${{ matrix.onnxruntime }}
           cache-from: type=gha,scope=${{ matrix.variant }}
           cache-to: type=gha,mode=max,scope=${{ matrix.variant }}
 
@@ -111,6 +130,9 @@ jobs:
           VARIANT: ${{ matrix.variant }}
           PACKAGES: ${{ matrix.packages }}
           WITH_UV: ${{ matrix.uv }}
+          WITH_RUST: ${{ matrix.rust }}
+          WITH_NODE: ${{ matrix.node }}
+          WITH_ONNXRUNTIME: ${{ matrix.onnxruntime }}
         run: |
           set -euxo pipefail
           cli="$(docker run --rm --entrypoint /home/claude/.local/bin/claude claude-container:test --version | awk '{print $1}')"
@@ -120,7 +142,8 @@ jobs:
 
           mkdir -p ws && sudo chown 1234:1234 ws
           docker run -d --name smoke -e PUID=1234 -e PGID=1234 -v "$PWD/ws:/workspace" claude-container:test
-          sleep 5
+          # Ready once start-up is done (with rustup, that includes installing the toolchain)
+          for _ in $(seq 1 120); do docker logs smoke 2>&1 | grep -q "Ready\." && break; sleep 5; done
           docker logs smoke
           # UID/GID remapping
           [[ "$(docker exec -u claude smoke id -u)" == "1234" ]]
@@ -152,8 +175,54 @@ jobs:
           elif docker exec smoke sh -c 'command -v uv'; then
             echo "uv must not be in the $VARIANT image"; exit 1
           fi
+          # Rust: toolchain installed into the config volume on start, with clippy
+          # and rustfmt, building a crate that compiles C code through the cc crate
+          if [[ "$WITH_RUST" == true ]]; then
+            docker exec smoke grep -q '`rustup`' /etc/claude-code/CLAUDE.md
+            docker exec -u claude -w /tmp smoke bash -euxc '
+              [[ "$(command -v rustc)" == /usr/local/bin/rustc ]]
+              rustc --version
+              rustup default | grep -q "^stable"
+              [[ -d /home/claude/.claude/rustup/toolchains ]]
+              cargo new --quiet demo && cd demo
+              printf "\n[build-dependencies]\ncc = \"1\"\n" >> Cargo.toml
+              mkdir csrc && echo "int answer(void) { return 42; }" > csrc/answer.c
+              echo "fn main() { cc::Build::new().file(\"csrc/answer.c\").compile(\"answer\"); }" > build.rs
+              printf "unsafe extern \"C\" {\n    fn answer() -> i32;\n}\nfn main() {\n    println!(\"{}\", unsafe { answer() });\n}\n" > src/main.rs
+              cargo fmt
+              cargo fmt --check
+              cargo clippy --quiet -- -D warnings
+              [[ "$(cargo run --quiet)" == 42 ]]'
+          elif docker exec smoke sh -c 'command -v rustup'; then
+            echo "rustup must not be in the $VARIANT image"; exit 1
+          fi
+          # Node.js: node/npm/npx, with global installs in the config volume
+          if [[ "$WITH_NODE" == true ]]; then
+            docker exec smoke grep -q '`node`' /etc/claude-code/CLAUDE.md
+            docker exec -u claude -w /tmp smoke bash -euxc '
+              node --version
+              npx --version
+              npm install -g --silent semver
+              [[ "$(command -v semver)" == /home/claude/.claude/npm-global/bin/semver ]]'
+          elif docker exec smoke sh -c 'command -v node'; then
+            echo "node must not be in the $VARIANT image"; exit 1
+          fi
+          # ONNX Runtime: the pinned version loads from ORT_DYLIB_PATH
+          if [[ "$WITH_ONNXRUNTIME" == true ]]; then
+            ort="$(sed -n 's/^ARG ONNXRUNTIME_VERSION=//p' Dockerfile)"
+            docker exec smoke grep -q '`onnxruntime`' /etc/claude-code/CLAUDE.md
+            docker exec -u claude smoke python3 -c '
+          import ctypes, os, sys
+          lib = ctypes.CDLL(os.environ["ORT_DYLIB_PATH"])
+          lib.OrtGetApiBase.restype = ctypes.POINTER(ctypes.c_void_p * 2)
+          version = ctypes.CFUNCTYPE(ctypes.c_char_p)(lib.OrtGetApiBase().contents[1])().decode()
+          print("ONNX Runtime", version)
+          sys.exit(version != sys.argv[1])' "$ort"
+          elif docker exec smoke sh -c 'ls /usr/local/lib/libonnxruntime*'; then
+            echo "ONNX Runtime must not be in the $VARIANT image"; exit 1
+          fi
           # Python variant: python/pip/venv work for the claude user, plus git and curl
-          if [[ "$VARIANT" == python ]]; then
+          if [[ "$VARIANT" == python || "$VARIANT" == full ]]; then
             docker exec -u claude -w /tmp smoke bash -euxc '
               python --version
               python3 -m venv /tmp/venv
@@ -169,7 +238,7 @@ jobs:
 
           # ...and unhealthy with Remote Control on but no login.
           docker run -d --name smoke-rc -e CLAUDE_REMOTE_CONTROL=true claude-container:test
-          sleep 5
+          for _ in $(seq 1 120); do docker logs smoke-rc 2>&1 | grep -q "needs a one-time setup" && break; sleep 5; done
           grep -q "needs a one-time setup" <<<"$(docker logs smoke-rc 2>&1)"
           if docker exec smoke-rc healthcheck; then echo "expected unhealthy"; exit 1; fi
           docker rm -f smoke-rc
@@ -205,5 +274,8 @@ jobs:
           build-args: |
             EXTRA_APT_PACKAGES=${{ matrix.packages }}
             WITH_UV=${{ matrix.uv }}
+            WITH_RUST=${{ matrix.rust }}
+            WITH_NODE=${{ matrix.node }}
+            WITH_ONNXRUNTIME=${{ matrix.onnxruntime }}
           cache-from: type=gha,scope=${{ matrix.variant }}
           cache-to: type=gha,mode=max,scope=${{ matrix.variant }}
