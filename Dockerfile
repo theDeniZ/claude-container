@@ -10,7 +10,7 @@
 #   WITH_NODE         Node.js LTS with npm and npx
 #   WITH_ONNXRUNTIME  ONNX Runtime shared library (libonnxruntime.so), for crates
 #                     that load it at runtime through ORT_DYLIB_PATH
-ARG UV_VERSION=0.12.23
+ARG UV_VERSION=0.13.0
 ARG RUSTUP_VERSION=1.29.1
 ARG NODE_VERSION=24.21.0
 # ONNX Runtime is not auto-bumped: the version must match what the `ort` crate
