@@ -12,7 +12,7 @@
 #                     that load it at runtime through ORT_DYLIB_PATH
 ARG UV_VERSION=0.12.23
 ARG RUSTUP_VERSION=1.29.1
-ARG NODE_VERSION=24.21.0
+ARG NODE_VERSION=26.13.0
 # ONNX Runtime is not auto-bumped: the version must match what the `ort` crate
 # of the projects using it expects. Microsoft publishes no checksum files, so
 # the SHA-256 of each release tarball is pinned here.
